@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "284637742388",
+    "project_id": "voice-assistant-2e03d",
+    "storage_bucket": "voice-assistant-2e03d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:284637742388:android:ad295868df00cb10b89161",
+        "android_client_info": {
+          "package_name": "com.example.voice_assistant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHNaSCX9n80IJIj5P_ur1-Pv0JvSJxrZU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
