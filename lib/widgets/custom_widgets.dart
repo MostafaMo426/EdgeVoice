@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-// Reusable Text Field Widget
+// Reusable Text Field Widget (Dark Mode Version)
 Widget buildTextField({
   required String label,
   required String hint,
@@ -15,7 +15,7 @@ Widget buildTextField({
       Text(
           label,
           style: const TextStyle(
-              color: Colors.grey,
+              color: Colors.white70, // Lighter text for dark mode
               fontSize: 14,
               fontWeight: FontWeight.w500
           )
@@ -24,18 +24,24 @@ Widget buildTextField({
       TextFormField(
         controller: controller,
         obscureText: isPassword ? !isVisible : false,
+        style: const TextStyle(color: Colors.white), // User typing color
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(color: Colors.grey[400]),
-          // UPDATED: Reduced vertical padding to make field smaller
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          hintStyle: TextStyle(color: Colors.grey[500]),
+          filled: true,
+          fillColor: const Color(0xFF1E293B), // Dark input background
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), // Compact height
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.grey),
+            borderSide: BorderSide.none, // Clean look without border lines
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.grey),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(30),
+            borderSide: const BorderSide(color: Color(0xFF00F0FF)), // Cyan glow on focus
           ),
           suffixIcon: isPassword
               ? IconButton(
@@ -49,7 +55,7 @@ Widget buildTextField({
   );
 }
 
-// Reusable Social Login Section (No changes here, but included for completeness)
+// Reusable Social Login Section
 class SocialLoginSection extends StatelessWidget {
   final String dividerText;
   const SocialLoginSection({super.key, required this.dividerText});
@@ -60,12 +66,12 @@ class SocialLoginSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Expanded(child: Divider()),
+            Expanded(child: Divider(color: Colors.white.withValues(alpha: 0.2))),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Text(dividerText, style: const TextStyle(color: Colors.grey)),
             ),
-            const Expanded(child: Divider()),
+            Expanded(child: Divider(color: Colors.white.withValues(alpha: 0.2))),
           ],
         ),
         const SizedBox(height: 20),
@@ -85,15 +91,22 @@ class SocialLoginSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        color: const Color(0xFF1E293B), // Dark Button Background
         borderRadius: BorderRadius.circular(30),
-        color: Colors.white,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Row(
         children: [
           Image.asset(imagePath, height: 24, width: 24, fit: BoxFit.contain),
           const SizedBox(width: 10),
-          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+          Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white, // White text
+              )
+          ),
         ],
       ),
     );
