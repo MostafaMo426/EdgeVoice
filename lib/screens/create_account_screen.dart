@@ -117,7 +117,14 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 30),
-                                const Text("Logo", style: TextStyle(fontSize: 40, fontWeight: FontWeight.w600, height: 1.0, color: Colors.white)),
+
+                                // --- LOGO SIZE INCREASED HERE (120) ---
+                                Image.asset(
+                                  'assets/images/Logo.jpg',
+                                  height: 120,
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.centerLeft,
+                                ),
                               ],
                             ),
                           ),
