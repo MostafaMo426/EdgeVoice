@@ -55,7 +55,7 @@ lib/
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/MostafaMo426/edge-voice.git]
+    git clone [https://github.com/MostafaMo426/EdgeVoice.git]
     ```
 2.  **Install dependencies:**
     ```bash
