@@ -1,0 +1,15 @@
+# Ignore Windows/Linux/MacOS runner code (C++)
+windows/* linguist-vendored
+linux/* linguist-vendored
+macos/* linguist-vendored
+*.cpp linguist-vendored
+*.h linguist-vendored
+*.cc linguist-vendored
+
+# Ignore Web files (HTML)
+web/* linguist-vendored
+*.html linguist-vendored
+
+# Ignore Android/iOS build files
+android/* linguist-vendored
+ios/* linguist-vendored
