@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Required for Auto-Login
+import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/welcome_screen.dart';
-import 'screens/home_screen.dart'; // Required to navigate to Home
+import 'screens/home_screen.dart';
+import 'firebase_options.dart'; // Import the generated file
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 

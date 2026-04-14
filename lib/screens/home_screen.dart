@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
-import 'settings_screen.dart'; // <--- IMPORT THE NEW SETTINGS SCREEN
+import 'settings_screen.dart'; 
+import 'logs_screen.dart'; // Import Logs Screen
+import 'rooms_screen.dart'; // Import Rooms Screen
+import '../services/api_service.dart'; // Import API Service
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,6 +14,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final ApiService _apiService = ApiService(); // Initialize API Service
+
   // --- 1. MASTER STATE ---
   Map<String, bool> deviceStates = {
     'living_lights': true,
@@ -22,7 +27,74 @@ class _HomeScreenState extends State<HomeScreen> {
     'washer': false,
     'vacuum': true,
     'humidifier': false,
+    'front_door': false,
+    'ac_unit': true,
   };
+
+  // --- REUSABLE UPDATE METHOD ---
+  void _updateDevice(String key, bool state, {bool silent = false}) {
+    if (deviceStates.containsKey(key)) {
+      setState(() {
+        deviceStates[key] = state;
+      });
+
+      // Send to API
+      _apiService.addCommand(name: key, value: state ? 1 : 0);
+      _apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
+
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("${key.replaceAll('_', ' ')}: ${state ? 'ON' : 'OFF'}"),
+          backgroundColor: Colors.green,
+          duration: const Duration(milliseconds: 500),
+        ));
+      }
+    }
+  }
+
+  // --- GROUP TOGGLES ---
+  void _toggleLights() {
+    bool anyOn = deviceStates['living_lights']! || deviceStates['bed_lights']! || deviceStates['kitchen_lights']!;
+    bool target = !anyOn;
+    _updateDevice('living_lights', target, silent: true);
+    _updateDevice('bed_lights', target, silent: true);
+    _updateDevice('kitchen_lights', target, silent: true);
+    _showBulkFeedback("Lights", target);
+  }
+
+  void _toggleDoors() {
+    bool target = !deviceStates['front_door']!;
+    _updateDevice('front_door', target);
+  }
+
+  void _toggleClimate() {
+    bool anyOn = deviceStates['bed_fan']! || deviceStates['humidifier']! || deviceStates['ac_unit']!;
+    bool target = !anyOn;
+    _updateDevice('bed_fan', target, silent: true);
+    _updateDevice('humidifier', target, silent: true);
+    _updateDevice('ac_unit', target, silent: true);
+    _showBulkFeedback("Climate", target);
+  }
+
+  void _toggleSecurity() {
+    // If anything is on, turn EVERYTHING off. Else turn everything on.
+    bool anyOn = deviceStates.values.any((val) => val == true);
+    bool target = !anyOn;
+    
+    deviceStates.keys.forEach((key) {
+      _updateDevice(key, target, silent: true);
+    });
+    
+    _showBulkFeedback("All Systems", target);
+  }
+
+  void _showBulkFeedback(String group, bool state) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text("$group: ${state ? 'ALL ON / OPEN' : 'ALL OFF / CLOSED'}"),
+      backgroundColor: state ? Colors.blue : Colors.redAccent,
+      duration: const Duration(seconds: 1),
+    ));
+  }
 
   int _selectedIndex = 0;
   bool _isSystemArmed = true;
@@ -43,6 +115,40 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _speech = stt.SpeechToText();
     _initSpeech();
+    _startPolling(); // Add polling for "Notifications"
+  }
+
+  void _startPolling() async {
+    // Poll for pending commands every 10 seconds (Simulating Notifications)
+    while (mounted) {
+      await Future.delayed(const Duration(seconds: 10));
+      final pending = await _apiService.getPendingCommands();
+      if (pending.isNotEmpty && mounted) {
+        for (var cmd in pending) {
+          _showNotification(cmd['name'], cmd['value'] == 1);
+          await _apiService.markCommandAsExecuted(cmd['id']);
+        }
+      }
+    }
+  }
+
+  void _showNotification(String name, bool state) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(
+        children: [
+          const Icon(Icons.notifications_active, color: Colors.white),
+          const SizedBox(width: 10),
+          Text("Remote Command: $name is now ${state ? 'ON' : 'OFF'}"),
+        ],
+      ),
+      backgroundColor: Colors.purple,
+      behavior: SnackBarBehavior.floating,
+    ));
+    
+    // Update local UI state
+    if (deviceStates.containsKey(name)) {
+      setState(() => deviceStates[name] = state);
+    }
   }
 
   void _initSpeech() async {
@@ -99,19 +205,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _processVoiceCommand(String command) {
     command = command.toLowerCase();
 
-    void setDevice(String key, bool state) {
-      if (deviceStates.containsKey(key)) {
-        setState(() {
-          deviceStates[key] = state;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Executed: $key turned ${state ? 'ON' : 'OFF'}"),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 1),
-        ));
-      }
-    }
-
     // Default to Toggle if user doesn't say "on" or "off"
     bool? targetState;
     if (command.contains("on") || command.contains("start") || command.contains("open")) targetState = true;
@@ -120,73 +213,51 @@ class _HomeScreenState extends State<HomeScreen> {
     // --- SMART COMMAND MATCHING ---
     // Living Room
     if (command.contains("living") && (command.contains("light") || command.contains("lamp"))) {
-      setDevice('living_lights', targetState ?? !deviceStates['living_lights']!);
+      _updateDevice('living_lights', targetState ?? !deviceStates['living_lights']!);
     }
     if (command.contains("tv") || command.contains("television")) {
-      setDevice('living_tv', targetState ?? !deviceStates['living_tv']!);
+      _updateDevice('living_tv', targetState ?? !deviceStates['living_tv']!);
     }
 
     // Bedroom
     if (command.contains("bed") && (command.contains("light") || command.contains("lamp"))) {
-      setDevice('bed_lights', targetState ?? !deviceStates['bed_lights']!);
+      _updateDevice('bed_lights', targetState ?? !deviceStates['bed_lights']!);
     }
     if (command.contains("fan") || command.contains("air")) {
-      setDevice('bed_fan', targetState ?? !deviceStates['bed_fan']!);
+      _updateDevice('bed_fan', targetState ?? !deviceStates['bed_fan']!);
     }
 
     // Kitchen
     if (command.contains("kitchen") && (command.contains("light") || command.contains("lamp"))) {
-      setDevice('kitchen_lights', targetState ?? !deviceStates['kitchen_lights']!);
+      _updateDevice('kitchen_lights', targetState ?? !deviceStates['kitchen_lights']!);
     }
     if (command.contains("coffee") || command.contains("brew")) {
-      setDevice('kitchen_coffee', targetState ?? !deviceStates['kitchen_coffee']!);
+      _updateDevice('kitchen_coffee', targetState ?? !deviceStates['kitchen_coffee']!);
     }
 
     // Appliances
     if (command.contains("vacuum") || command.contains("robot") || command.contains("clean")) {
-      setDevice('vacuum', targetState ?? !deviceStates['vacuum']!);
+      _updateDevice('vacuum', targetState ?? !deviceStates['vacuum']!);
     }
     if (command.contains("washer") || command.contains("laundry")) {
-      setDevice('washer', targetState ?? !deviceStates['washer']!);
+      _updateDevice('washer', targetState ?? !deviceStates['washer']!);
     }
     if (command.contains("humidifier")) {
-      setDevice('humidifier', targetState ?? !deviceStates['humidifier']!);
+      _updateDevice('humidifier', targetState ?? !deviceStates['humidifier']!);
     }
 
     // Master Commands
-    if (command.contains("all lights on")) {
-      setState(() {
-        deviceStates['living_lights'] = true;
-        deviceStates['bed_lights'] = true;
-        deviceStates['kitchen_lights'] = true;
-      });
-    }
-    if (command.contains("all lights off") || command.contains("turn off everything")) {
-      setState(() {
-        deviceStates.updateAll((key, value) => false);
-      });
-    }
+    if (command.contains("all lights on")) _toggleLights();
+    if (command.contains("all lights off") || command.contains("turn off everything")) _toggleSecurity();
   }
 
   void toggleDevice(String key) {
-    if (deviceStates.containsKey(key)) {
-      setState(() {
-        deviceStates[key] = !deviceStates[key]!;
-      });
-    }
+    _updateDevice(key, !deviceStates[key]!);
   }
 
   // --- NAVIGATION LOGIC ---
   void _onNavItemTapped(int index) {
     setState(() => _selectedIndex = index);
-
-    // If "Settings" (Index 3) is tapped, go to Settings Screen
-    if (index == 3) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const SettingsScreen()),
-      );
-    }
   }
 
   @override
@@ -204,139 +275,146 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _buildNavItem(Icons.home_filled, "Home", 0),
             _buildNavItem(Icons.grid_view_rounded, "Rooms", 1),
-            _buildNavItem(Icons.insert_chart_outlined_rounded, "Energy", 2),
+            _buildNavItem(Icons.insert_chart_outlined_rounded, "Logs", 2),
             _buildNavItem(Icons.settings, "Settings", 3),
           ],
         ),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [gradientStart, gradientEnd],
-          ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [
+          _buildHomeBody(),
+          const RoomsScreen(),
+          const LogsScreen(),
+          const SettingsScreen(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeBody() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [gradientStart, gradientEnd],
         ),
-        child: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeader(),
-                const SizedBox(height: 30),
-                _buildMicHero(), // <--- Updated Mic Widget
-                const SizedBox(height: 30),
-                // ... (The rest of your layout remains exactly the same) ...
-
-                // I will paste the rest of the body layout here so you can copy the WHOLE file safely
-                const Text("Quick Actions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _QuickActionBtn(icon: Icons.lightbulb_outline, label: "Lights", onTap: () => _processVoiceCommand("all lights on")),
-                    _QuickActionBtn(icon: Icons.door_front_door_outlined, label: "Doors", onTap: (){}),
-                    _QuickActionBtn(icon: Icons.thermostat, label: "Climate", onTap: (){}),
-                    _QuickActionBtn(icon: Icons.shield_outlined, label: "Security", onTap: (){}),
-                  ],
-                ),
-                const SizedBox(height: 30),
-
-                const Text("Rooms", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-
-                _buildRoomCard(
-                    "Living Room", "6 devices active", Icons.weekend,
-                    [
-                      DeviceToggle(
-                        icon: Icons.lightbulb,
-                        label: deviceStates['living_lights']! ? "Lights On" : "Lights Off",
-                        isActive: deviceStates['living_lights']!,
-                        onTap: () => toggleDevice('living_lights'),
-                      ),
-                      DeviceToggle(
-                        icon: Icons.tv,
-                        label: deviceStates['living_tv']! ? "TV On" : "TV Off",
-                        isActive: deviceStates['living_tv']!,
-                        onTap: () => toggleDevice('living_tv'),
-                      ),
-                      TemperatureDisplay(icon: Icons.thermostat, label: "$livingRoomTemp\nClimate"),
-                    ]
-                ),
-                const SizedBox(height: 15),
-
-                _buildRoomCard(
-                    "Bedroom", "3 devices active", Icons.bed,
-                    [
-                      DeviceToggle(
-                        icon: Icons.lightbulb,
-                        label: deviceStates['bed_lights']! ? "Lights On" : "Lights Off",
-                        isActive: deviceStates['bed_lights']!,
-                        onTap: () => toggleDevice('bed_lights'),
-                      ),
-                      DeviceToggle(
-                        icon: Icons.air,
-                        label: deviceStates['bed_fan']! ? "Fan On" : "Fan Off",
-                        isActive: deviceStates['bed_fan']!,
-                        onTap: () => toggleDevice('bed_fan'),
-                      ),
-                      TemperatureDisplay(icon: Icons.thermostat, label: "$bedroomTemp\nClimate"),
-                    ]
-                ),
-                const SizedBox(height: 15),
-
-                _buildRoomCard(
-                    "Kitchen", "4 devices active", Icons.kitchen,
-                    [
-                      DeviceToggle(
-                        icon: Icons.lightbulb,
-                        label: deviceStates['kitchen_lights']! ? "Lights On" : "Lights Off",
-                        isActive: deviceStates['kitchen_lights']!,
-                        onTap: () => toggleDevice('kitchen_lights'),
-                      ),
-                      DeviceToggle(
-                        icon: Icons.coffee,
-                        label: deviceStates['kitchen_coffee']! ? "Brewing" : "Coffee Off",
-                        isActive: deviceStates['kitchen_coffee']!,
-                        onTap: () => toggleDevice('kitchen_coffee'),
-                      ),
-                      const TemperatureDisplay(icon: Icons.kitchen, label: "Fridge\nOn"),
-                    ]
-                ),
-
-                const SizedBox(height: 30),
-                const Text("Appliances", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 15,
-                  mainAxisSpacing: 15,
-                  childAspectRatio: 0.8,
-                  children: [
-                    ApplianceCard(
-                        name: "AC Unit", status: "Monitoring", value: acTemp, icon: Icons.ac_unit,
-                        isActive: true, isStatic: true, onTap: () {}
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(),
+              const SizedBox(height: 30),
+              _buildMicHero(), // <--- Updated Mic Widget
+              const SizedBox(height: 30),
+              const Text("Quick Actions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 15),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _QuickActionBtn(icon: Icons.lightbulb_outline, label: "Lights", onTap: _toggleLights),
+                  _QuickActionBtn(icon: Icons.door_front_door_outlined, label: "Doors", onTap: _toggleDoors),
+                  _QuickActionBtn(icon: Icons.thermostat, label: "Climate", onTap: _toggleClimate),
+                  _QuickActionBtn(icon: Icons.shield_outlined, label: "Security", onTap: _toggleSecurity),
+                ],
+              ),
+              const SizedBox(height: 30),
+              const Text("Rooms", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 15),
+              _buildRoomCard(
+                  "Living Room", "6 devices active", Icons.weekend,
+                  [
+                    DeviceToggle(
+                      icon: Icons.lightbulb,
+                      label: deviceStates['living_lights']! ? "Lights On" : "Lights Off",
+                      isActive: deviceStates['living_lights']!,
+                      onTap: () => toggleDevice('living_lights'),
                     ),
-                    ApplianceCard(
-                        name: "Washer", status: deviceStates['washer']! ? "Running" : "Off", value: "--", icon: Icons.local_laundry_service,
-                        isActive: deviceStates['washer']!, onTap: () => toggleDevice('washer')
+                    DeviceToggle(
+                      icon: Icons.tv,
+                      label: deviceStates['living_tv']! ? "TV On" : "TV Off",
+                      isActive: deviceStates['living_tv']!,
+                      onTap: () => toggleDevice('living_tv'),
                     ),
-                    ApplianceCard(
-                        name: "Vacuum", status: deviceStates['vacuum']! ? "Cleaning" : "Docked", value: "45%", icon: Icons.cleaning_services,
-                        isActive: deviceStates['vacuum']!, isAccent: true, onTap: () => toggleDevice('vacuum')
+                    TemperatureDisplay(icon: Icons.thermostat, label: "$livingRoomTemp\nClimate"),
+                  ]
+              ),
+              const SizedBox(height: 15),
+              _buildRoomCard(
+                  "Bedroom", "3 devices active", Icons.bed,
+                  [
+                    DeviceToggle(
+                      icon: Icons.lightbulb,
+                      label: deviceStates['bed_lights']! ? "Lights On" : "Lights Off",
+                      isActive: deviceStates['bed_lights']!,
+                      onTap: () => toggleDevice('bed_lights'),
                     ),
-                    ApplianceCard(
-                        name: "Humidifier", status: deviceStates['humidifier']! ? "Active" : "Off", value: "52%", icon: Icons.water_drop,
-                        isActive: deviceStates['humidifier']!, onTap: () => toggleDevice('humidifier')
+                    DeviceToggle(
+                      icon: Icons.air,
+                      label: deviceStates['bed_fan']! ? "Fan On" : "Fan Off",
+                      isActive: deviceStates['bed_fan']!,
+                      onTap: () => toggleDevice('bed_fan'),
                     ),
-                  ],
-                ),
-              ],
-            ),
+                    TemperatureDisplay(icon: Icons.thermostat, label: "$bedroomTemp\nClimate"),
+                  ]
+              ),
+              const SizedBox(height: 15),
+              _buildRoomCard(
+                  "Kitchen", "4 devices active", Icons.kitchen,
+                  [
+                    DeviceToggle(
+                      icon: Icons.lightbulb,
+                      label: deviceStates['kitchen_lights']! ? "Lights On" : "Lights Off",
+                      isActive: deviceStates['kitchen_lights']!,
+                      onTap: () => toggleDevice('kitchen_lights'),
+                    ),
+                    DeviceToggle(
+                      icon: Icons.coffee,
+                      label: deviceStates['kitchen_coffee']! ? "Brewing" : "Coffee Off",
+                      isActive: deviceStates['kitchen_coffee']!,
+                      onTap: () => toggleDevice('kitchen_coffee'),
+                    ),
+                    const TemperatureDisplay(icon: Icons.kitchen, label: "Fridge\nOn"),
+                  ]
+              ),
+              const SizedBox(height: 30),
+              const Text("Appliances", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 15),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 15,
+                mainAxisSpacing: 15,
+                childAspectRatio: 0.8,
+                children: [
+                  ApplianceCard(
+                      name: "AC Unit", 
+                      status: deviceStates['ac_unit']! ? "Cooling" : "Off", 
+                      value: acTemp, icon: Icons.ac_unit,
+                      isActive: deviceStates['ac_unit']!, 
+                      onTap: () => toggleDevice('ac_unit')
+                  ),
+                  ApplianceCard(
+                      name: "Washer", status: deviceStates['washer']! ? "Running" : "Off", value: "--", icon: Icons.local_laundry_service,
+                      isActive: deviceStates['washer']!, onTap: () => toggleDevice('washer')
+                  ),
+                  ApplianceCard(
+                      name: "Vacuum", status: deviceStates['vacuum']! ? "Cleaning" : "Docked", value: "45%", icon: Icons.cleaning_services,
+                      isActive: deviceStates['vacuum']!, isAccent: true, onTap: () => toggleDevice('vacuum')
+                  ),
+                  ApplianceCard(
+                      name: "Humidifier", status: deviceStates['humidifier']! ? "Active" : "Off", value: "52%", icon: Icons.water_drop,
+                      isActive: deviceStates['humidifier']!, onTap: () => toggleDevice('humidifier')
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -520,11 +598,27 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 15),
-          const Row(
+          Row(
             children: [
-              Expanded(child: _SecurityStatusBtn(icon: Icons.door_back_door, label: "Front Door", status: "Locked")),
-              SizedBox(width: 10),
-              Expanded(child: _SecurityStatusBtn(icon: Icons.videocam, label: "Cameras", status: "3 Active")),
+              Expanded(
+                child: _SecurityStatusBtn(
+                  icon: Icons.door_back_door,
+                  label: "Front Door",
+                  status: deviceStates['front_door']! ? "Open" : "Locked",
+                  isLocked: !deviceStates['front_door']!,
+                  onTap: () => toggleDevice('front_door'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SecurityStatusBtn(
+                  icon: Icons.videocam,
+                  label: "Cameras",
+                  status: "3 Active",
+                  isLocked: false,
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cameras Info"))),
+                ),
+              ),
             ],
           )
         ],
@@ -710,15 +804,23 @@ class _SecurityStatusBtn extends StatelessWidget {
   final IconData icon;
   final String label;
   final String status;
+  final bool isLocked;
+  final VoidCallback onTap;
 
-  const _SecurityStatusBtn({required this.icon, required this.label, required this.status});
+  const _SecurityStatusBtn({
+    required this.icon,
+    required this.label,
+    required this.status,
+    required this.isLocked,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final bool isDoor = label.contains("Door");
+
     return GestureDetector(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$label Info")));
-      },
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: const Color(0xFF0F1115), borderRadius: BorderRadius.circular(15)),
@@ -728,7 +830,13 @@ class _SecurityStatusBtn extends StatelessWidget {
             Icon(icon, color: const Color(0xFF00F0FF), size: 20),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
-            Text(status, style: const TextStyle(color: Color(0xFF00F0FF), fontSize: 11)),
+            Text(
+              status,
+              style: TextStyle(
+                color: isDoor ? (isLocked ? Colors.greenAccent : Colors.redAccent) : const Color(0xFF00F0FF),
+                fontSize: 11,
+              ),
+            ),
           ],
         ),
       ),
