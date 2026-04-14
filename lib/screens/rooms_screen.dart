@@ -136,7 +136,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF0F1115),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             ),
             padding: const EdgeInsets.all(25),
             child: Column(
@@ -178,7 +178,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
                               children: [
                                 Switch(
                                   value: true, // Placeholder for state
-                                  activeColor: accentCyan,
+                                  activeThumbColor: accentCyan,
                                   onChanged: (val) {},
                                 ),
                                 IconButton(
@@ -306,7 +306,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
                           decoration: BoxDecoration(
                             color: cardColor,
                             borderRadius: BorderRadius.circular(25),
-                            border: Border.all(color: Colors.white.withOpacity(0.05)),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                           ),
                           child: Stack(
                             children: [
