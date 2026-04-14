@@ -1,32 +1,43 @@
 # EdgeVoice 🎙️
 
-**EdgeVoice** is a modern, AI-powered voice assistant application built using Flutter. The app features a futuristic "Cyberpunk/Dark Mode" aesthetic, utilizing custom gradients, vector assets, and a secure authentication flow to provide a premium user experience.
+**EdgeVoice** is a modern, AI-powered voice assistant and Smart Home controller built using Flutter. The app features a futuristic "Cyberpunk/Dark Mode" aesthetic, utilizing custom gradients, vector assets, and a secure authentication flow to provide a premium user experience.
 
 ---
 
-## 🚀 Features
+## 🚀 Key Features
 
-### 🎨 Modern UI/UX
-* **Dark Mode Aesthetic:** A sleek interface using deep gradients (`0xFF1E293B` to `0xFF5270A1`) and Cyan accents (`0xFF00F0FF`).
-* **Responsive Layouts:** Optimized for various screen sizes using `Stack`, `Positioned`, and `SafeArea` widgets.
-* **Custom Assets:** Integration of high-quality vector graphics and branding elements.
+### 🏠 Smart Home Control
+* **Persistent Navigation:** Uses `IndexedStack` to maintain state across Home, Rooms, Logs, and Settings tabs.
+* **Dynamic Room Management:** 
+    * Add, edit, and delete rooms.
+    * Square grid layout for better space utilization.
+    * **Drag-and-Drop Reordering:** Long-press to rearrange rooms in your preferred order.
+* **Device Management:** Add or remove devices (Lights, TV, AC, etc.) within specific rooms.
+* **Remote Sync:** 10-second polling checks an external API for pending commands and updates local UI states automatically.
 
-### 🔐 Authentication Flow
-* **Welcome Screen:** A branded entry point with a custom logo and smooth navigation.
-* **Sign Up:** Complete registration form with real-time validation:
-    * Email format checking.
-    * Password strength (Length + Uppercase requirements).
-    * Password confirmation matching.
-* **Login:** Secure email/password entry with "Remember Me" toggle and password visibility controls.
+### 🎙️ Voice Assistant (AI Integrated)
+* **Speech-to-Text (STT):** High-accuracy voice recognition for hands-free control.
+* **Smart Command Matching:** Processes natural language to toggle specific devices (e.g., "Turn on living room lights").
+* **Automated Listening:** Automatically stops listening after detecting silence for 2 seconds.
+
+### 📊 Logs & Monitoring
+* **Real-time Logs:** Tracks user actions and remote commands in a dedicated Logs tab.
+* **API Integration:** Connects to a custom REST API for persistent command history and logging.
+
+### 🔐 Authentication & Security
+* **Firebase Auth:** Secure login and registration with persistent sessions (auto-login on restart).
+* **Validation:** Robust form validation for email formats and password strength.
+* **Cyberpunk UI:** Consistent dark theme using Cyan accents (`0xFF00F0FF`) and high-end gradients.
 
 ---
 
 ## 🛠️ Tech Stack
 
 * **Framework:** [Flutter](https://flutter.dev/) (Dart)
-* **Backend Integration:** Firebase Authentication (via `AuthService`)
-* **Architecture:** MVC (Model-View-Controller)
-* **State Management:** `StatefulWidget`
+* **Backend:** Firebase (Auth & Core)
+* **REST API:** custom .NET API for IoT command handling.
+* **State Management:** `Provider` & `StatefulWidget`
+* **Local Services:** `SpeechToText`, `PermissionHandler`, `Http`
 
 ---
 
@@ -35,74 +46,79 @@
 ```text
 lib/
 ├── screens/
-│   ├── welcome_screen.dart       # Landing/Splash page with Logo
-│   ├── login_screen.dart         # User Sign-in Logic & UI
-│   └── create_account_screen.dart # User Registration Logic & UI
+│   ├── welcome_screen.dart     # Landing/Splash page
+│   ├── login_screen.dart       # User Sign-in
+│   ├── create_account_screen.dart # User Registration
+│   ├── home_screen.dart        # Master Dashboard (IndexedStack)
+│   ├── rooms_screen.dart       # Grid-based Room & Device Management
+│   ├── logs_screen.dart        # History of commands and actions
+│   └── settings_screen.dart    # Profile & App configuration
 ├── services/
-│   └── auth_service.dart         # Authentication logic (Firebase)
+│   ├── auth_service.dart       # Firebase Authentication
+│   └── api_service.dart        # REST API for Commands & Logs
 ├── widgets/
-│   └── custom_widgets.dart       # Reusable UI components (Inputs, Buttons)
-└── main.dart                     # App entry point
+│   └── custom_widgets.dart     # Reusable UI components
+└── main.dart                   # App entry point & Auth stream
 ```
----
-## 📸 Screenshots
 
-| Welcome Screen | Login Screen | Sign Up Screen |
-|:---:|:---:|:---:|
-| *(Add screenshot here)* | *(Add screenshot here)* | *(Add screenshot here)* |
+---
 
 ## 🏁 Getting Started
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/MostafaMo426/EdgeVoice.git]
+    git clone https://github.com/MostafaMo426/EdgeVoice.git
     ```
 2.  **Install dependencies:**
     ```bash
     flutter pub get
     ```
-3.  **Setup Assets:**
-    * Ensure the `assets/images/` folder contains `Logo.jpg`, `Vector.png`, `rafiki.png`, and `rafiki2.png`.
+3.  **Firebase Setup:**
+    * Run `flutterfire configure` to set up your project.
+    * The app uses `DefaultFirebaseOptions` for multi-platform support (Web, Android, iOS).
 4.  **Run the app:**
     ```bash
     flutter run
     ```
+
 ---
-## 🗺️ Future Roadmap
 
-We are currently in **Phase 1** of development. Here is the plan to evolve **EdgeVoice** into a fully functional AI assistant.
+## 📸 Screenshots
 
-### 📍 Phase 1: Foundation & Security (Current Status: ✅ In Progress)
-- [x] Design High-fidelity UI for Welcome, Login, and Sign Up screens.
-- [x] Implement Input Validation (Email regex, Password strength).
-- [ ] **Next Step:** Integrate Firebase Auth fully (Connect Sign Up/Login logic to real backend).
-- [ ] Create a persistent "User Session" (Auto-login if the user returns).
-- [ ] Build the basic `HomeScreen` layout.
+| Dashboard | Rooms Grid | Voice Control |
+|:---:|:---:|:---:|
+| ![Home](assets/images/Logo.jpg) | *(Add screenshot)* | *(Add screenshot)* |
 
-### 🗣️ Phase 2: Voice & Audio Core
-- [ ] Integrate **Speech-to-Text (STT):** Allow the app to listen to microphone input and convert it to strings.
-- [ ] Integrate **Text-to-Speech (TTS):** Give EdgeVoice a voice to respond to the user.
-- [ ] Add **Audio Visualizers:** Create a wave or orb animation that reacts to voice volume (UI Polish).
-- [ ] Implement Permission Handling (Microphone access requests).
-
-### 🧠 Phase 3: The "Brain" (AI Integration)
-- [ ] Connect to an LLM API (OpenAI GPT-4 or Google Gemini).
-- [ ] Send converted text (from STT) to the API and receive intelligent responses.
-- [ ] Implement "Context Awareness" so the assistant remembers previous questions in the session.
-
-### ⚙️ Phase 4: Personalization & Settings
-- [ ] **Profile Management:** Allow users to update their name and profile picture.
-- [ ] **Voice Settings:** Options to change the assistant's voice speed, pitch, or language.
-- [ ] **Theme Toggle:** Switch between "Cyberpunk Dark" and "Minimalist Light" modes.
-
-### 🚀 Phase 5: Deployment
-- [ ] Optimize app performance (reduce asset sizes).
-- [ ] Generate release APK/AAB bundles.
-- [ ] Publish to Google Play Store.
 ---
+
+## 🗺️ Progress Roadmap
+
+### ✅ Phase 1: Foundation & Security (Completed)
+- [x] High-fidelity Cyberpunk UI.
+- [x] Firebase Auth Integration (Sign Up/Login).
+- [x] Persistent "User Session" (Auto-login).
+- [x] Bottom Navigation with `IndexedStack`.
+
+### ✅ Phase 2: Smart Home & API (Completed)
+- [x] **Rooms System:** Square grid with Drag-to-Reorder logic.
+- [x] **REST API Integration:** Command polling and Log submission.
+- [x] **Device CRUD:** Full management of devices inside rooms.
+
+### 🗣️ Phase 3: Voice Core (Completed)
+- [x] **Speech-to-Text:** Live voice recognition.
+- [x] **Logic Engine:** Pattern matching for voice commands.
+- [x] **Auto-Silence Detection:** 2-second timeout for better UX.
+
+### 🧠 Phase 4: Future Improvements
+- [ ] **Text-to-Speech (TTS):** Give the assistant a voice to reply.
+- [ ] **LLM Integration:** Connect to OpenAI/Gemini for smarter conversations.
+- [ ] **Real-time WebSockets:** Replace 10s polling with instant updates.
+
+---
+
 ## 👨‍💻 Contributors
 
-* **[Mostafa Mohamed]** - *Initial Work & Development*
+* **Mostafa Mohamed** - *Lead Developer*
 
 ## 📄 License
 
