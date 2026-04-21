@@ -1,53 +1,99 @@
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 
 class AuthService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  late final Dio _dio;
 
-  // 1. Sign Up (Updated to send Verification Email)
-  Future<String?> signUp({required String email, required String password, required String fullName}) async {
-    try {
-      UserCredential result = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+  AuthService() {
+    _dio = Dio(BaseOptions(
+      baseUrl: AppConfig.apiBaseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      headers: {
+        'accept': '*/*',
+        'Content-Type': 'application/json',
+      },
+    ));
 
-      User? user = result.user;
-
-      // Update the name
-      await user?.updateDisplayName(fullName);
-
-      // NEW: Send Verification Email immediately
-      await user?.sendEmailVerification();
-
-      return null; // Success
-    } on FirebaseAuthException catch (e) {
-      return e.message;
-    } catch (e) {
-      return "An unknown error occurred";
+    if (!kIsWeb) {
+      (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+        final client = HttpClient();
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        return client;
+      };
     }
   }
 
-  // 2. Sign In
-  Future<String?> signIn({required String email, required String password}) async {
+  // 1. Sign Up
+  Future<String?> signUp({
+    required String email,
+    required String password,
+    required String fullName,
+  }) async {
     try {
-      UserCredential result = await _auth.signInWithEmailAndPassword(email: email, password: password);
+      final response = await _dio.post('/Auth/register', data: {
+        'email': email,
+        'password': password,
+        'fullName': fullName,
+      });
 
-      // Optional: Check if they verified their email before letting them in
-      if (!result.user!.emailVerified) {
-        // You can choose to block them, or just let them in.
-        // For now, let's just return null (Success).
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return null;
       }
-
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return e.message;
-    } catch (e) {
-      return "An unknown error occurred";
+      return "Error: ${response.statusCode}";
+    } on DioException catch (e) {
+      return e.response?.data?.toString() ?? e.message;
     }
   }
 
-  // 3. Sign Out
+  // 2. Sign In (Updated with Token Storage)
+  Future<String?> signIn({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final response = await _dio.post('/Auth/login', data: {
+        'email': email,
+        'password': password,
+      });
+
+      if (response.statusCode == 200) {
+        final prefs = await SharedPreferences.getInstance();
+        
+        // Ensure response data is a Map
+        if (response.data is! Map) {
+          return "Invalid server response (HTML)";
+        }
+
+        // SAVE TOKEN AND USER ID
+        String token = response.data['token'] ?? "";
+        int userId = response.data['userId'] ?? 1; // Default to 1 if not provided
+        
+        await prefs.setString('token', token);
+        await prefs.setInt('userId', userId);
+        await prefs.setBool('isLoggedIn', true);
+        
+        print("Login Success! Token saved.");
+        return null; 
+      }
+      return "Login Failed";
+    } on DioException catch (e) {
+      return e.response?.data?.toString() ?? "Connection Error";
+    }
+  }
+
   Future<void> signOut() async {
-    await _auth.signOut();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+  }
+
+  Future<bool> isLoggedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('isLoggedIn') ?? false;
   }
 }

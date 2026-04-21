@@ -38,8 +38,9 @@ class _HomeScreenState extends State<HomeScreen> {
         deviceStates[key] = state;
       });
 
-      // Send to API
-      _apiService.addCommand(name: key, value: state ? 1 : 0);
+      // Send to API with new format
+      String action = state ? "Turn ON" : "Turn OFF";
+      _apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
       _apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
 
       if (!silent) {
@@ -81,9 +82,9 @@ class _HomeScreenState extends State<HomeScreen> {
     bool anyOn = deviceStates.values.any((val) => val == true);
     bool target = !anyOn;
     
-    deviceStates.keys.forEach((key) {
+    for (var key in deviceStates.keys) {
       _updateDevice(key, target, silent: true);
-    });
+    }
     
     _showBulkFeedback("All Systems", target);
   }
@@ -100,7 +101,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSystemArmed = true;
   late stt.SpeechToText _speech;
   bool _isListening = false;
-  String _text = "Tap to Speak";
+  bool _isPassiveListening = false;
+  bool _wakeWordDetected = false;
+  String _text = "Say 'Edge' or Tap";
 
   // Colors & Data
   final Color gradientStart = const Color(0xFF1E293B);
@@ -115,19 +118,46 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _speech = stt.SpeechToText();
     _initSpeech();
-    _startPolling(); // Add polling for "Notifications"
+    _loadInitialStates();
+    _startPolling();
+  }
+
+  Future<void> _loadInitialStates() async {
+    final commands = await _apiService.getCommands();
+    if (commands.isNotEmpty) {
+      setState(() {
+        for (var cmd in commands) {
+          String action = cmd['action'] ?? "";
+          // Determine state from action string: e.g. "Turn ON living_lights"
+          bool value = action.toUpperCase().contains("ON");
+          
+          // Try to find which device this belongs to
+          for(var key in deviceStates.keys) {
+            if(action.contains(key)) {
+               deviceStates[key] = value;
+            }
+          }
+        }
+      });
+    }
   }
 
   void _startPolling() async {
     // Poll for pending commands every 10 seconds (Simulating Notifications)
     while (mounted) {
       await Future.delayed(const Duration(seconds: 10));
-      final pending = await _apiService.getPendingCommands();
-      if (pending.isNotEmpty && mounted) {
-        for (var cmd in pending) {
-          _showNotification(cmd['name'], cmd['value'] == 1);
-          await _apiService.markCommandAsExecuted(cmd['id']);
+      try {
+        final pending = await _apiService.getPendingCommands();
+        if (pending.isNotEmpty && mounted) {
+          for (var cmd in pending) {
+            String action = cmd['action'] ?? "";
+            bool state = action.toUpperCase().contains("ON");
+            _showNotification(action, state);
+            await _apiService.markCommandAsExecuted(cmd['id']);
+          }
         }
+      } catch (e) {
+        print("Polling error: $e");
       }
     }
   }
@@ -152,50 +182,118 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _initSpeech() async {
-    await _speech.initialize();
-    if (mounted) setState(() {});
-  }
-
-  // --- 2. VOICE LOGIC (Updated) ---
-  void _listen() async {
-    if (!_isListening) {
-      var status = await Permission.microphone.request();
-      if (status.isDenied) return;
-
+    try {
       bool available = await _speech.initialize(
-        onStatus: (val) {
-          // If the phone detects silence or 'done', stop the UI animation
-          if (val == 'done' || val == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (val) => setState(() => _isListening = false),
-      );
-
-      if (available) {
-        setState(() {
-          _isListening = true;
-          _text = "Listening...";
-        });
-
-        _speech.listen(
-          // --- MAGIC FIX: Stop automatically after 2 seconds of silence ---
-          pauseFor: const Duration(seconds: 2),
-          onResult: (val) {
-            setState(() {
-              _text = val.recognizedWords;
-              // If the sentence is final (user stopped talking), run command
-              if (val.finalResult) {
-                _processVoiceCommand(val.recognizedWords);
-                // Optionally clear text after a delay
-                Future.delayed(const Duration(seconds: 2), () {
-                  if (mounted) setState(() => _text = "Tap to Speak");
+        onStatus: (status) {
+          print("Speech Status: $status");
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) {
+              setState(() => _isListening = false);
+              
+              if (_wakeWordDetected) {
+                _wakeWordDetected = false;
+                // Add a small delay to let the engine reset before active listen
+                Future.delayed(const Duration(milliseconds: 300), () => _listen());
+              } else {
+                // Return to passive mode if we weren't just triggered
+                Future.delayed(const Duration(milliseconds: 800), () {
+                  if (mounted && !_isListening && !_isPassiveListening) {
+                    _startWakeWordListener();
+                  }
                 });
               }
-            });
-          },
-        );
+            }
+          }
+        },
+        onError: (error) {
+          print("Speech Error: $error");
+          _isPassiveListening = false;
+          _isListening = false;
+          _wakeWordDetected = false;
+          // Restart on error
+          Future.delayed(const Duration(seconds: 1), () => _startWakeWordListener());
+        }
+      );
+      if (available) _startWakeWordListener();
+    } catch (e) {
+      print("Speech Init Error: $e");
+    }
+  }
+
+  void _startWakeWordListener() async {
+    if (_isListening || _isPassiveListening) return;
+
+    setState(() => _isPassiveListening = true);
+    print("PASSIVE MODE: Waiting for 'Edge'...");
+    
+    _speech.listen(
+      onResult: (val) {
+        String words = val.recognizedWords.toLowerCase().trim();
+        if (words.contains("edge")) {
+          print("WAKE WORD DETECTED!");
+          _wakeWordDetected = true;
+          _isPassiveListening = false;
+          _speech.stop(); // This triggers onStatus -> 'done' -> calls _listen()
+        }
+      },
+      listenFor: const Duration(minutes: 5),
+      pauseFor: const Duration(seconds: 10),
+      partialResults: true,
+      cancelOnError: true,
+    );
+  }
+
+  // --- 2. VOICE LOGIC ---
+  void _listen() async {
+    if (!_isListening) {
+      // If we were in passive mode, ensure it's stopped
+      if (_isPassiveListening) {
+        _isPassiveListening = false;
+        _speech.stop();
       }
+
+      bool status = await _speech.initialize();
+      if (!status) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Speech recognition not available")));
+        return;
+      }
+
+      setState(() {
+        _isListening = true;
+        _text = "Listening...";
+      });
+
+      // 5-SECOND AUTO TIMEOUT
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _isListening && _text == "Listening...") {
+          _speech.stop();
+          setState(() {
+            _isListening = false;
+            _text = "Tap to Speak";
+          });
+        }
+      });
+
+      _speech.listen(
+        listenFor: const Duration(seconds: 10), // Maximum total listen time
+        pauseFor: const Duration(seconds: 3),   // Stop after 3s of silence
+        onResult: (val) {
+          setState(() {
+            _text = val.recognizedWords;
+            if (val.finalResult) {
+              _processVoiceCommand(val.recognizedWords);
+              
+              // AUTO STOP ON FINISH
+              _speech.stop();
+              setState(() => _isListening = false);
+              
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) setState(() => _text = "Tap to Speak");
+              });
+            }
+          });
+        },
+      );
     } else {
       setState(() => _isListening = false);
       _speech.stop();
@@ -203,52 +301,80 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _processVoiceCommand(String command) {
-    command = command.toLowerCase();
+    // 1. Clean up the string
+    command = command.toLowerCase().trim();
+    
+    // 2. Remove "edge" if it's anywhere in the command (especially at the start)
+    command = command.replaceAll("edge", "").trim();
+
+    if (command.isEmpty) return;
+
+    print("VOICE COMMAND RECEIVED: $command");
 
     // Default to Toggle if user doesn't say "on" or "off"
     bool? targetState;
-    if (command.contains("on") || command.contains("start") || command.contains("open")) targetState = true;
-    if (command.contains("off") || command.contains("stop") || command.contains("close")) targetState = false;
+    if (command.contains("on") || command.contains("start") || command.contains("open") || command.contains("activate")) targetState = true;
+    if (command.contains("off") || command.contains("stop") || command.contains("close") || command.contains("deactivate")) targetState = false;
 
     // --- SMART COMMAND MATCHING ---
-    // Living Room
-    if (command.contains("living") && (command.contains("light") || command.contains("lamp"))) {
+    
+    // 1. Living Room
+    if (command.contains("living") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
       _updateDevice('living_lights', targetState ?? !deviceStates['living_lights']!);
     }
-    if (command.contains("tv") || command.contains("television")) {
+    else if (command.contains("tv") || command.contains("television") || command.contains("screen")) {
       _updateDevice('living_tv', targetState ?? !deviceStates['living_tv']!);
     }
 
-    // Bedroom
-    if (command.contains("bed") && (command.contains("light") || command.contains("lamp"))) {
+    // 2. Bedroom
+    else if (command.contains("bed") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
       _updateDevice('bed_lights', targetState ?? !deviceStates['bed_lights']!);
     }
-    if (command.contains("fan") || command.contains("air")) {
+    else if (command.contains("fan") || (command.contains("bedroom") && command.contains("air"))) {
       _updateDevice('bed_fan', targetState ?? !deviceStates['bed_fan']!);
     }
 
-    // Kitchen
-    if (command.contains("kitchen") && (command.contains("light") || command.contains("lamp"))) {
+    // 3. Kitchen
+    else if (command.contains("kitchen") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
       _updateDevice('kitchen_lights', targetState ?? !deviceStates['kitchen_lights']!);
     }
-    if (command.contains("coffee") || command.contains("brew")) {
+    else if (command.contains("coffee") || command.contains("brew") || command.contains("espresso")) {
       _updateDevice('kitchen_coffee', targetState ?? !deviceStates['kitchen_coffee']!);
     }
 
-    // Appliances
-    if (command.contains("vacuum") || command.contains("robot") || command.contains("clean")) {
+    // 4. Appliances & Security
+    else if (command.contains("vacuum") || command.contains("robot") || command.contains("clean")) {
       _updateDevice('vacuum', targetState ?? !deviceStates['vacuum']!);
     }
-    if (command.contains("washer") || command.contains("laundry")) {
+    else if (command.contains("washer") || command.contains("laundry") || command.contains("washing")) {
       _updateDevice('washer', targetState ?? !deviceStates['washer']!);
     }
-    if (command.contains("humidifier")) {
+    else if (command.contains("humidifier")) {
       _updateDevice('humidifier', targetState ?? !deviceStates['humidifier']!);
     }
+    else if (command.contains("door") || command.contains("gate") || command.contains("entrance")) {
+      _updateDevice('front_door', targetState ?? !deviceStates['front_door']!);
+    }
+    else if (command.contains("ac") || command.contains("air condition")) {
+      _updateDevice('ac_unit', targetState ?? !deviceStates['ac_unit']!);
+    }
 
-    // Master Commands
-    if (command.contains("all lights on")) _toggleLights();
-    if (command.contains("all lights off") || command.contains("turn off everything")) _toggleSecurity();
+    // 5. Master Commands
+    if (command.contains("all lights") && (command.contains("on") || command.contains("start"))) {
+       _updateDevice('living_lights', true, silent: true);
+       _updateDevice('bed_lights', true, silent: true);
+       _updateDevice('kitchen_lights', true, silent: true);
+       _showBulkFeedback("All Lights", true);
+    }
+    else if (command.contains("all lights") && (command.contains("off") || command.contains("stop"))) {
+       _updateDevice('living_lights', false, silent: true);
+       _updateDevice('bed_lights', false, silent: true);
+       _updateDevice('kitchen_lights', false, silent: true);
+       _showBulkFeedback("All Lights", false);
+    }
+    else if (command.contains("everything off") || command.contains("goodbye") || command.contains("leaving")) {
+       _toggleSecurity(); // This turns everything off in your logic
+    }
   }
 
   void toggleDevice(String key) {
@@ -256,8 +382,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- NAVIGATION LOGIC ---
+  final GlobalKey<LogsScreenState> _logsKey = GlobalKey<LogsScreenState>();
+
   void _onNavItemTapped(int index) {
     setState(() => _selectedIndex = index);
+    if (index == 2) {
+      // If switching to Logs tab, trigger refresh
+      _logsKey.currentState?.refreshLogs();
+    }
   }
 
   @override
@@ -285,8 +417,8 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           _buildHomeBody(),
           const RoomsScreen(),
-          const LogsScreen(),
-          const SettingsScreen(),
+          LogsScreen(key: _logsKey, isStandalone: false),
+          const SettingsScreen(isStandalone: false),
         ],
       ),
     );

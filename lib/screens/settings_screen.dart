@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'welcome_screen.dart'; // Make sure to import your Welcome Screen
+import '../services/auth_service.dart';
+import 'welcome_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   final bool isStandalone;
@@ -8,39 +8,56 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AuthService authService = AuthService();
+
     Widget content = Container(
-      color: const Color(0xFF181A20),
+      color: const Color(0xFF181A20), // Matches Cyberpunk theme
       child: Column(
         children: [
-          AppBar(
-            title: const Text("Settings", style: TextStyle(color: Colors.white)),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            automaticallyImplyLeading: false, // Remove back button
-            iconTheme: const IconThemeData(color: Colors.white),
+          const SizedBox(height: 50),
+          const Text(
+            "Settings",
+            style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
           ),
+          const SizedBox(height: 20),
+          const Divider(color: Colors.white10),
+          
           Expanded(
             child: Center(
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
-                onPressed: () async {
-                  await FirebaseAuth.instance.signOut();
-                  if (context.mounted) {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                      (route) => false,
-                    );
-                  }
-                },
-                child: const Text(
-                  "Log Out",
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.account_circle, color: Color(0xFF00F0FF), size: 100),
+                  const SizedBox(height: 20),
+                  const Text("Active Session", style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 40),
+                  
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.logout, color: Colors.white),
+                    label: const Text(
+                      "Log Out",
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent.withValues(alpha: 0.8),
+                      minimumSize: const Size(200, 56),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    onPressed: () async {
+                      // Perform Logout using our Custom AuthService
+                      await authService.signOut();
+                      
+                      if (context.mounted) {
+                        // Return to Welcome Screen
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+                          (route) => false,
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
             ),
           ),
@@ -49,7 +66,7 @@ class SettingsScreen extends StatelessWidget {
     );
 
     if (isStandalone) {
-      return Scaffold(body: content);
+      return Scaffold(backgroundColor: const Color(0xFF181A20), body: content);
     } else {
       return content;
     }

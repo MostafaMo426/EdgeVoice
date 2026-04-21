@@ -1,44 +1,93 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 
 class ApiService {
-  final String baseUrl = "http://bodathedev-001-site1.ltempurl.com/api";
+  late final Dio _dio;
+
+  ApiService() {
+    _dio = Dio(BaseOptions(
+      baseUrl: AppConfig.apiBaseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      headers: {
+        'accept': '*/*',
+        'Content-Type': 'application/json',
+      },
+    ));
+
+    // Allow self-signed certificates for Ngrok (Only on Mobile/Desktop)
+    if (!kIsWeb) {
+      (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+        final client = HttpClient();
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        return client;
+      };
+    }
+
+    // --- ADDED: INTERCEPTOR TO ATTACH TOKEN ---
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token');
+        if (token != null && token.isNotEmpty) {
+          options.headers['Authorization'] = 'Bearer $token';
+        }
+        return handler.next(options);
+      },
+    ));
+  }
 
   // --- COMMANDS ---
 
-  /// Adds a new command to the system
-  Future<bool> addCommand({required String name, required int value}) async {
+  // Updated to match the backend dev's new format
+  Future<bool> addCommand({required String triggerWord, required String action}) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/commands'),
-        headers: {
-          'accept': '*/*',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          "name": name,
-          "value": value,
-          "isExecuted": false,
-        }),
-      );
-      print("POST Command: ${response.statusCode} - ${response.body}");
-      return response.statusCode == 200 || response.statusCode == 201;
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId') ?? 1;
+
+      final response = await _dio.post('/Commands', data: {
+        "triggerWord": triggerWord,
+        "action": action,
+        "userId": userId
+      });
+      
+      return response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 300;
     } catch (e) {
       print("Error adding command: $e");
       return false;
     }
   }
 
-  /// Fetches all commands
+  Future<List<dynamic>> getPendingCommands() async {
+    try {
+      final response = await _dio.get('/Commands/pending');
+      if (response.statusCode == 200 && response.data is List) {
+        return response.data;
+      }
+    } catch (e) {
+      print("Error fetching pending: $e");
+    }
+    return [];
+  }
+
+  Future<bool> markCommandAsExecuted(int id) async {
+    try {
+      final response = await _dio.put('/Commands/$id/executed');
+      return response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 300;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<List<dynamic>> getCommands() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/commands'),
-        headers: {'accept': '*/*'},
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+      final response = await _dio.get('/Commands');
+      if (response.statusCode == 200 && response.data is List) {
+        return response.data;
       }
     } catch (e) {
       print("Error fetching commands: $e");
@@ -46,72 +95,22 @@ class ApiService {
     return [];
   }
 
-  /// Fetches pending commands (Simulates "Notifications")
-  Future<List<dynamic>> getPendingCommands() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/commands/pending'),
-        headers: {'accept': '*/*'},
-      );
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      }
-    } catch (e) {
-      print("Error fetching pending commands: $e");
-    }
-    return [];
-  }
-
-  /// Marks a command as executed
-  Future<bool> markCommandAsExecuted(int id) async {
-    try {
-      final response = await http.put(
-        Uri.parse('$baseUrl/commands/$id/executed'),
-        headers: {'accept': '*/*'},
-      );
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print("Error marking command as executed: $e");
-      return false;
-    }
-  }
-
   // --- LOGS ---
 
-  /// Adds a new log message
   Future<bool> addLog(String message) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/logs'),
-        headers: {
-          'accept': '*/*',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          "message": message,
-          "timestamp": DateTime.now().toIso8601String()
-        }),
-      );
-      print("POST Log: ${response.statusCode}");
-      return response.statusCode == 200 || response.statusCode == 201;
+      final response = await _dio.post('/Logs', data: {"message": message});
+      return response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 300;
     } catch (e) {
-      print("Error adding log: $e");
       return false;
     }
   }
 
-  /// Fetches all logs
   Future<List<dynamic>> getLogs() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/logs'),
-        headers: {'accept': '*/*'},
-      );
-
+      final response = await _dio.get('/Logs');
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        return response.data;
       }
     } catch (e) {
       print("Error fetching logs: $e");

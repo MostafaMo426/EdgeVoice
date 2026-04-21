@@ -1,15 +1,24 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/home_screen.dart';
-import 'firebase_options.dart'; // Import the generated file
+import 'services/auth_service.dart';
+
+// --- ADDED: HTTP OVERRIDES FOR NGROK ---
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  
+  // Apply the overrides
+  HttpOverrides.global = MyHttpOverrides();
+  
   runApp(const MyApp());
 }
 
@@ -18,69 +27,27 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AuthService authService = AuthService();
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Smart Home App',
-
-      // Theme Settings
       theme: ThemeData(
         primaryColor: Colors.black,
         scaffoldBackgroundColor: Colors.white,
-        useMaterial3: true, // Ensures modern styling
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 50),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFF8F8F8),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.transparent),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.transparent),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.black),
-          ),
-        ),
+        useMaterial3: true,
       ),
-
-      // --- AUTO-LOGIN LOGIC ---
-      // This StreamBuilder listens to Firebase.
-      // If the user logs in, it automatically switches to HomeScreen.
-      // If they close the app and reopen it, it remembers them.
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
+      home: FutureBuilder<bool>(
+        future: authService.isLoggedIn(),
         builder: (context, snapshot) {
-          // 1. Waiting for connection check
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator(color: Colors.black)),
             );
           }
-
-          // 2. Error Check
-          if (snapshot.hasError) {
-            return const Scaffold(
-              body: Center(child: Text("Something went wrong!")),
-            );
-          }
-
-          // 3. User is Logged In -> Go to Home
-          if (snapshot.hasData) {
+          if (snapshot.data == true) {
             return const HomeScreen();
           }
-
-          // 4. User is NOT Logged In -> Go to Welcome
           return const WelcomeScreen();
         },
       ),

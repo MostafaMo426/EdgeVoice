@@ -4,8 +4,6 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // This line connects your app to Firebase
-        classpath("com.google.gms:google-services:4.4.2")
     }
 }
 
