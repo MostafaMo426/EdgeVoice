@@ -87,6 +87,13 @@ class AuthService {
     }
   }
 
+  Future<void> bypassLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', true);
+    await prefs.setString('token', 'bypass_token'); // Temporary token
+    await prefs.setInt('userId', 1); // Default User ID
+  }
+
   Future<void> signOut() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();

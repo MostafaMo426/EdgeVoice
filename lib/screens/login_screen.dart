@@ -185,6 +185,22 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 20),
 
                           Center(
+                            child: TextButton(
+                              onPressed: () async {
+                                await _authService.bypassLogin();
+                                if (mounted) {
+                                  Navigator.pushAndRemoveUntil(
+                                    context,
+                                    MaterialPageRoute(builder: (context) => const HomeScreen()),
+                                    (route) => false,
+                                  );
+                                }
+                              },
+                              child: const Text("Dev: Bypass Login (Database Offline)", style: TextStyle(color: Colors.grey, fontSize: 12, decoration: TextDecoration.underline)),
+                            ),
+                          ),
+
+                          Center(
                             child: GestureDetector(
                               onTap: () {
                                 Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const CreateAccountScreen()));
