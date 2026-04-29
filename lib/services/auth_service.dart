@@ -17,6 +17,7 @@ class AuthService {
       headers: {
         'accept': '*/*',
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
     ));
 
@@ -36,7 +37,7 @@ class AuthService {
     required String fullName,
   }) async {
     try {
-      final response = await _dio.post('/Auth/register', data: {
+      final response = await _dio.post('Auth/register', data: {
         'email': email,
         'password': password,
         'fullName': fullName,
@@ -57,7 +58,7 @@ class AuthService {
     required String password,
   }) async {
     try {
-      final response = await _dio.post('/Auth/login', data: {
+      final response = await _dio.post('Auth/login', data: {
         'email': email,
         'password': password,
       });

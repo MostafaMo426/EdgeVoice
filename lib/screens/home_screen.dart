@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   };
 
   // --- REUSABLE UPDATE METHOD ---
-  void _updateDevice(String key, bool state, {bool silent = false}) {
+  Future<void> _updateDevice(String key, bool state, {bool silent = false}) async {
     if (deviceStates.containsKey(key)) {
       setState(() {
         deviceStates[key] = state;
@@ -40,8 +40,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Send to API with new format
       String action = state ? "Turn ON" : "Turn OFF";
-      _apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
-      _apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
+      try {
+        await _apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
+        await _apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
+      } catch (e) {
+        print("Error syncing with server: $e");
+      }
 
       if (!silent) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -192,11 +196,12 @@ class _HomeScreenState extends State<HomeScreen> {
               
               if (_wakeWordDetected) {
                 _wakeWordDetected = false;
-                // Add a small delay to let the engine reset before active listen
-                Future.delayed(const Duration(milliseconds: 300), () => _listen());
+                print("Switching from Passive to Active...");
+                // DELAY IS CRITICAL: Let the engine reset before active listen
+                Future.delayed(const Duration(milliseconds: 500), () => _listen());
               } else {
                 // Return to passive mode if we weren't just triggered
-                Future.delayed(const Duration(milliseconds: 800), () {
+                Future.delayed(const Duration(milliseconds: 1000), () {
                   if (mounted && !_isListening && !_isPassiveListening) {
                     _startWakeWordListener();
                   }
@@ -210,8 +215,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _isPassiveListening = false;
           _isListening = false;
           _wakeWordDetected = false;
-          // Restart on error
-          Future.delayed(const Duration(seconds: 1), () => _startWakeWordListener());
+          // Restart listener after a short delay on error
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) _startWakeWordListener();
+          });
         }
       );
       if (available) _startWakeWordListener();

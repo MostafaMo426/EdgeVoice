@@ -1,11 +1,5 @@
 import 'package:flutter/material.dart';
-
-class Room {
-  String name;
-  List<String> devices;
-
-  Room({required this.name, required this.devices});
-}
+import '../services/api_service.dart';
 
 class RoomsScreen extends StatefulWidget {
   final bool isStandalone;
@@ -16,16 +10,38 @@ class RoomsScreen extends StatefulWidget {
 }
 
 class _RoomsScreenState extends State<RoomsScreen> {
-  final List<Room> _rooms = [
-    Room(name: "Living Room", devices: ["Lights", "TV", "AC"]),
-    Room(name: "Bedroom", devices: ["Lights", "Fan", "Curtains"]),
-    Room(name: "Kitchen", devices: ["Lights", "Coffee Maker"]),
-  ];
+  final ApiService _apiService = ApiService();
+  List<dynamic> _rooms = [];
+  bool _isLoading = true;
 
   final Color gradientStart = const Color(0xFF1E293B);
   final Color gradientEnd = const Color(0xFF5270A1);
   final Color accentCyan = const Color(0xFF00F0FF);
   final Color cardColor = const Color(0xFF161E2E);
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRooms();
+  }
+
+  Future<void> _fetchRooms() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      final rooms = await _apiService.getRooms();
+      if (mounted) {
+        setState(() {
+          _rooms = rooms;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   void _addRoom() {
     String newRoomName = "";
@@ -55,12 +71,13 @@ class _RoomsScreenState extends State<RoomsScreen> {
             child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               if (newRoomName.isNotEmpty) {
-                setState(() {
-                  _rooms.add(Room(name: newRoomName, devices: []));
-                });
-                Navigator.pop(context);
+                final success = await _apiService.addRoom(newRoomName);
+                if (success) {
+                  _fetchRooms();
+                  if (mounted) Navigator.pop(context);
+                }
               }
             },
             child: Text("Add", style: TextStyle(color: accentCyan)),
@@ -71,7 +88,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 
   void _editRoom(int index) {
-    String updatedName = _rooms[index].name;
+    String updatedName = _rooms[index]['name'] ?? "";
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -95,11 +112,13 @@ class _RoomsScreenState extends State<RoomsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              setState(() {
-                _rooms.removeAt(index);
-              });
-              Navigator.pop(context);
+            onPressed: () async {
+              final roomId = _rooms[index]['id'];
+              final success = await _apiService.deleteRoom(roomId);
+              if (success) {
+                _fetchRooms();
+                if (mounted) Navigator.pop(context);
+              }
             },
             child: const Text("Delete", style: TextStyle(color: Colors.redAccent)),
           ),
@@ -108,12 +127,14 @@ class _RoomsScreenState extends State<RoomsScreen> {
             child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               if (updatedName.isNotEmpty) {
-                setState(() {
-                  _rooms[index].name = updatedName;
-                });
-                Navigator.pop(context);
+                final roomId = _rooms[index]['id'];
+                final success = await _apiService.updateRoom(roomId, updatedName);
+                if (success) {
+                  _fetchRooms();
+                  if (mounted) Navigator.pop(context);
+                }
               }
             },
             child: Text("Save", style: TextStyle(color: accentCyan)),
@@ -123,7 +144,12 @@ class _RoomsScreenState extends State<RoomsScreen> {
     );
   }
 
-  void _showRoomControls(int roomIndex) {
+  void _showRoomControls(int roomIndex) async {
+    final roomId = _rooms[roomIndex]['id'];
+    List<dynamic> roomDevices = await _apiService.getRoomDevices(roomId);
+
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -145,18 +171,19 @@ class _RoomsScreenState extends State<RoomsScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(room.name, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                    Text(room['name'] ?? "Room", style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                     IconButton(
                       icon: Icon(Icons.add_circle_outline, color: accentCyan),
-                      onPressed: () => _addDeviceToRoom(roomIndex, setModalState),
+                      onPressed: () => _addDeviceToRoom(roomIndex, setModalState, roomDevices),
                     ),
                   ],
                 ),
                 const SizedBox(height: 20),
                 Expanded(
                   child: ListView.builder(
-                    itemCount: room.devices.length,
+                    itemCount: roomDevices.length,
                     itemBuilder: (context, index) {
+                      final device = roomDevices[index];
                       return Container(
                         margin: const EdgeInsets.only(bottom: 15),
                         padding: const EdgeInsets.all(15),
@@ -169,25 +196,35 @@ class _RoomsScreenState extends State<RoomsScreen> {
                           children: [
                             Row(
                               children: [
-                                Icon(_getDeviceIcon(room.devices[index]), color: accentCyan),
+                                Icon(_getDeviceIcon(device['type'] ?? ""), color: accentCyan),
                                 const SizedBox(width: 15),
-                                Text(room.devices[index], style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                Text(device['name'] ?? "", style: const TextStyle(color: Colors.white, fontSize: 16)),
                               ],
                             ),
                             Row(
                               children: [
                                 Switch(
-                                  value: true, // Placeholder for state
+                                  value: device['status'] ?? false,
                                   activeThumbColor: accentCyan,
-                                  onChanged: (val) {},
+                                  onChanged: (val) async {
+                                    final success = await _apiService.updateDeviceStatus(device['id'], val);
+                                    if (success) {
+                                      setModalState(() {
+                                        device['status'] = val;
+                                      });
+                                      _apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");
+                                    }
+                                  },
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                                  onPressed: () {
-                                    setModalState(() {
-                                      room.devices.removeAt(index);
-                                    });
-                                    setState(() {});
+                                  onPressed: () async {
+                                    final success = await _apiService.deleteDevice(device['id']);
+                                    if (success) {
+                                      setModalState(() {
+                                        roomDevices.removeAt(index);
+                                      });
+                                    }
                                   },
                                 ),
                               ],
@@ -206,7 +243,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
     );
   }
 
-  void _addDeviceToRoom(int roomIndex, Function setModalState) {
+  void _addDeviceToRoom(int roomIndex, Function setModalState, List<dynamic> currentDevices) {
     final availableDevices = ["Lights", "TV", "AC", "Curtains", "Fan", "Door", "Coffee Maker"];
     showDialog(
       context: context,
@@ -221,12 +258,18 @@ class _RoomsScreenState extends State<RoomsScreen> {
             itemBuilder: (context, index) {
               return ListTile(
                 title: Text(availableDevices[index], style: const TextStyle(color: Colors.white)),
-                onTap: () {
-                  setState(() {
-                    _rooms[roomIndex].devices.add(availableDevices[index]);
-                  });
-                  setModalState(() {});
-                  Navigator.pop(context);
+                onTap: () async {
+                  final roomId = _rooms[roomIndex]['id'];
+                  final deviceName = availableDevices[index];
+                  final success = await _apiService.addDevice(roomId, deviceName, availableDevices[index]);
+                  if (success) {
+                    final updatedDevices = await _apiService.getRoomDevices(roomId);
+                    setModalState(() {
+                      currentDevices.clear();
+                      currentDevices.addAll(updatedDevices);
+                    });
+                    if (mounted) Navigator.pop(context);
+                  }
                 },
               );
             },
@@ -284,11 +327,13 @@ class _RoomsScreenState extends State<RoomsScreen> {
               ),
               const SizedBox(height: 20),
               Expanded(
-                child: Theme(
-                  data: Theme.of(context).copyWith(
-                    canvasColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                  ),
+                child: _isLoading 
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F0FF)))
+                : Theme(
+                    data: Theme.of(context).copyWith(
+                      canvasColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                    ),
                   child: ReorderableGridView(
                     itemCount: _rooms.length,
                     onReorder: (oldIndex, newIndex) {
@@ -299,9 +344,8 @@ class _RoomsScreenState extends State<RoomsScreen> {
                     },
                     itemBuilder: (context, index) {
                       return GestureDetector(
-                        key: ValueKey(_rooms[index].name + index.toString()),
+                        key: ValueKey(_rooms[index]['id']?.toString() ?? index.toString()),
                         onTap: () => _showRoomControls(index),
-                        // Removed onLongPress here to let LongPressDraggable handle it
                         child: Container(
                           decoration: BoxDecoration(
                             color: cardColor,
@@ -325,11 +369,11 @@ class _RoomsScreenState extends State<RoomsScreen> {
                                     Icon(Icons.room_preferences, color: accentCyan, size: 50),
                                     const SizedBox(height: 10),
                                     Text(
-                                      _rooms[index].name,
+                                      _rooms[index]['name'] ?? "",
                                       style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                                       textAlign: TextAlign.center,
                                     ),
-                                    Text("${_rooms[index].devices.length} Devices", style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+                                    Text("Tap to manage", style: TextStyle(color: Colors.grey[400], fontSize: 14)),
                                   ],
                                 ),
                               ),
@@ -355,9 +399,6 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 }
 
-// Simple Reorderable Grid Implementation if package not available
-// Since I can't add new packages easily, I will implement a manual drag-and-drop or use ReorderableListView if preferred.
-// For now, I'll use a ReorderableListView for simplicity and stability.
 class ReorderableGridView extends StatefulWidget {
   final int itemCount;
   final Widget Function(BuildContext, int) itemBuilder;
@@ -386,7 +427,7 @@ class _ReorderableGridViewState extends State<ReorderableGridView> {
         crossAxisCount: 2,
         crossAxisSpacing: 15,
         mainAxisSpacing: 15,
-        childAspectRatio: 1.0, // Perfect Squares
+        childAspectRatio: 1.0,
       ),
       itemBuilder: (context, index) {
         return DragTarget<int>(
