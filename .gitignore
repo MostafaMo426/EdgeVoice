@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Allow pushing the release APK to GitHub
+!build/app/outputs/flutter-apk/app-release.apk
