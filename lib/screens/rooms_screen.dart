@@ -6,10 +6,10 @@ class RoomsScreen extends StatefulWidget {
   const RoomsScreen({super.key, this.isStandalone = true});
 
   @override
-  State<RoomsScreen> createState() => _RoomsScreenState();
+  State<RoomsScreen> createState() => RoomsScreenState();
 }
 
-class _RoomsScreenState extends State<RoomsScreen> {
+class RoomsScreenState extends State<RoomsScreen> {
   final ApiService _apiService = ApiService();
   List<dynamic> _rooms = [];
   bool _isLoading = true;
@@ -19,13 +19,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
   final Color accentCyan = const Color(0xFF00F0FF);
   final Color cardColor = const Color(0xFF161E2E);
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchRooms();
-  }
-
-  Future<void> _fetchRooms() async {
+  Future<void> fetchRooms() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
@@ -39,107 +33,182 @@ class _RoomsScreenState extends State<RoomsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error fetching rooms: ${e.toString()}")),
+        );
       }
     }
   }
 
+  @override
+  void initState() {
+    super.initState();
+    fetchRooms();
+  }
+
   void _addRoom() {
     String newRoomName = "";
+    bool isSubmitting = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: cardColor,
-        title: const Text("Add New Room", style: TextStyle(color: Colors.white)),
-        content: TextField(
-          style: const TextStyle(color: Colors.black),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: "Room Name",
-            hintStyle: TextStyle(color: Colors.grey[600]),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: accentCyan),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: cardColor,
+          title: const Text("Add New Room", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                style: const TextStyle(color: Colors.black),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  hintText: "Room Name",
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: accentCyan),
+                  ),
+                ),
+                onChanged: (val) => newRoomName = val,
+              ),
+              if (isSubmitting)
+                Padding(
+                  padding: const EdgeInsets.only(top: 15),
+                  child: LinearProgressIndicator(color: accentCyan, backgroundColor: Colors.white24),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(context),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
             ),
-          ),
-          onChanged: (val) => newRoomName = val,
+            TextButton(
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
+                      if (newRoomName.trim().isEmpty) return;
+
+                      setDialogState(() => isSubmitting = true);
+                      try {
+                        final success = await _apiService.addRoom(newRoomName.trim());
+                        if (success) {
+                          await fetchRooms();
+                          if (mounted) Navigator.pop(context);
+                        } else {
+                          setDialogState(() => isSubmitting = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Failed to add room. Please try again.")),
+                            );
+                          }
+                        }
+                      } catch (e) {
+                        setDialogState(() => isSubmitting = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("Error: ${e.toString()}")),
+                          );
+                        }
+                      }
+                    },
+              child: Text(isSubmitting ? "Adding..." : "Add", style: TextStyle(color: accentCyan)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (newRoomName.isNotEmpty) {
-                final success = await _apiService.addRoom(newRoomName);
-                if (success) {
-                  _fetchRooms();
-                  if (mounted) Navigator.pop(context);
-                }
-              }
-            },
-            child: Text("Add", style: TextStyle(color: accentCyan)),
-          ),
-        ],
       ),
     );
   }
 
   void _editRoom(int index) {
     String updatedName = _rooms[index]['name'] ?? "";
+    bool isProcessing = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: cardColor,
-        title: const Text("Edit Room", style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: TextEditingController(text: updatedName),
-          style: const TextStyle(color: Colors.black),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: "Room Name",
-            hintStyle: TextStyle(color: Colors.grey[600]),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: accentCyan),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: cardColor,
+          title: const Text("Edit Room", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: TextEditingController(text: updatedName),
+                style: const TextStyle(color: Colors.black),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  hintText: "Room Name",
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: accentCyan),
+                  ),
+                ),
+                onChanged: (val) => updatedName = val,
+              ),
+              if (isProcessing)
+                Padding(
+                  padding: const EdgeInsets.only(top: 15),
+                  child: LinearProgressIndicator(color: accentCyan, backgroundColor: Colors.white24),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isProcessing
+                  ? null
+                  : () async {
+                      setDialogState(() => isProcessing = true);
+                      final roomId = _rooms[index]['id'];
+                      final success = await _apiService.deleteRoom(roomId);
+                      if (success) {
+                        fetchRooms();
+                        if (mounted) Navigator.pop(context);
+                      } else {
+                        setDialogState(() => isProcessing = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Failed to delete room.")),
+                          );
+                        }
+                      }
+                    },
+              child: const Text("Delete", style: TextStyle(color: Colors.redAccent)),
             ),
-          ),
-          onChanged: (val) => updatedName = val,
+            TextButton(
+              onPressed: isProcessing ? null : () => Navigator.pop(context),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: isProcessing
+                  ? null
+                  : () async {
+                      if (updatedName.trim().isEmpty) return;
+                      setDialogState(() => isProcessing = true);
+                      final roomId = _rooms[index]['id'];
+                      final success = await _apiService.updateRoom(roomId, updatedName.trim());
+                      if (success) {
+                        fetchRooms();
+                        if (mounted) Navigator.pop(context);
+                      } else {
+                        setDialogState(() => isProcessing = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Failed to update room.")),
+                          );
+                        }
+                      }
+                    },
+              child: Text(isProcessing ? "Saving..." : "Save", style: TextStyle(color: accentCyan)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              final roomId = _rooms[index]['id'];
-              final success = await _apiService.deleteRoom(roomId);
-              if (success) {
-                _fetchRooms();
-                if (mounted) Navigator.pop(context);
-              }
-            },
-            child: const Text("Delete", style: TextStyle(color: Colors.redAccent)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (updatedName.isNotEmpty) {
-                final roomId = _rooms[index]['id'];
-                final success = await _apiService.updateRoom(roomId, updatedName);
-                if (success) {
-                  _fetchRooms();
-                  if (mounted) Navigator.pop(context);
-                }
-              }
-            },
-            child: Text("Save", style: TextStyle(color: accentCyan)),
-          ),
-        ],
       ),
     );
   }
@@ -244,35 +313,63 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 
   void _addDeviceToRoom(int roomIndex, Function setModalState, List<dynamic> currentDevices) {
-    final availableDevices = ["Lights", "TV", "AC", "Curtains", "Fan", "Door", "Coffee Maker"];
+    final availableDevices = [
+      "Lights", "TV", "AC", "Curtains", "Fan", "Door", 
+      "Coffee Maker", "Fridge", "Air Fryer", "Washing Machine", "Dryer"
+    ];
+    bool isAdding = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: cardColor,
-        title: const Text("Add Device", style: TextStyle(color: Colors.white)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: availableDevices.length,
-            itemBuilder: (context, index) {
-              return ListTile(
-                title: Text(availableDevices[index], style: const TextStyle(color: Colors.white)),
-                onTap: () async {
-                  final roomId = _rooms[roomIndex]['id'];
-                  final deviceName = availableDevices[index];
-                  final success = await _apiService.addDevice(roomId, deviceName, availableDevices[index]);
-                  if (success) {
-                    final updatedDevices = await _apiService.getRoomDevices(roomId);
-                    setModalState(() {
-                      currentDevices.clear();
-                      currentDevices.addAll(updatedDevices);
-                    });
-                    if (mounted) Navigator.pop(context);
-                  }
-                },
-              );
-            },
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: cardColor,
+          title: const Text("Add Device", style: TextStyle(color: Colors.white)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isAdding)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: CircularProgressIndicator(color: Color(0xFF00F0FF)),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: availableDevices.length,
+                      itemBuilder: (context, index) {
+                        return ListTile(
+                          leading: Icon(_getDeviceIcon(availableDevices[index]), color: accentCyan, size: 20),
+                          title: Text(availableDevices[index], style: const TextStyle(color: Colors.white)),
+                          onTap: () async {
+                            setDialogState(() => isAdding = true);
+                            final roomId = _rooms[roomIndex]['id'];
+                            final deviceName = availableDevices[index];
+                            try {
+                              final success = await _apiService.addDevice(roomId, deviceName, availableDevices[index]);
+                              if (success) {
+                                final updatedDevices = await _apiService.getRoomDevices(roomId);
+                                setModalState(() {
+                                  currentDevices.clear();
+                                  currentDevices.addAll(updatedDevices);
+                                });
+                                if (mounted) Navigator.pop(context);
+                              } else {
+                                setDialogState(() => isAdding = false);
+                              }
+                            } catch (e) {
+                              setDialogState(() => isAdding = false);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -287,6 +384,10 @@ class _RoomsScreenState extends State<RoomsScreen> {
       case "Curtains": return Icons.curtains;
       case "Fan": return Icons.air;
       case "Door": return Icons.door_front_door;
+      case "Fridge": return Icons.kitchen;
+      case "Air Fryer": return Icons.outdoor_grill;
+      case "Washing Machine": return Icons.local_laundry_service;
+      case "Dryer": return Icons.dry;
       default: return Icons.device_hub;
     }
   }

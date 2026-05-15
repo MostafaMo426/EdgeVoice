@@ -1,10 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
 import 'settings_screen.dart'; 
 import 'logs_screen.dart'; // Import Logs Screen
 import 'rooms_screen.dart'; // Import Rooms Screen
 import '../services/api_service.dart'; // Import API Service
+import '../providers/edgevoice_voice_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,8 +15,9 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final ApiService _apiService = ApiService(); // Initialize API Service
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   // --- 1. MASTER STATE ---
   Map<String, bool> deviceStates = {
@@ -24,36 +27,279 @@ class _HomeScreenState extends State<HomeScreen> {
     'bed_fan': true,
     'kitchen_lights': false,
     'kitchen_coffee': false,
-    'washer': false,
+    'kitchen_fridge': true,
+    'air_fryer': false,
+    'washing_machine': false,
+    'dryer': false,
     'vacuum': true,
     'humidifier': false,
     'front_door': false,
     'ac_unit': true,
   };
 
+  List<dynamic> _rooms = [];
+  bool _isLoading = true;
+
+  File? _profileImage;
+  final ImagePicker _picker = ImagePicker();
+
+  Future<void> _handleImageAction(ImageSource? source) async {
+    if (source == null) {
+      setState(() => _profileImage = null);
+      return;
+    }
+    try {
+      final pickedFile = await _picker.pickImage(source: source);
+      if (pickedFile != null) {
+        setState(() {
+          _profileImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error picking image: $e");
+    }
+  }
+
   // --- REUSABLE UPDATE METHOD ---
   Future<void> _updateDevice(String key, bool state, {bool silent = false}) async {
+    final apiService = Provider.of<ApiService>(context, listen: false);
     if (deviceStates.containsKey(key)) {
       setState(() {
         deviceStates[key] = state;
       });
 
-      // Send to API with new format
-      String action = state ? "Turn ON" : "Turn OFF";
-      try {
-        await _apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
-        await _apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
-      } catch (e) {
-        print("Error syncing with server: $e");
+      // Find actual device ID if possible and update status via API
+      final device = _findDeviceByLegacyKey(key);
+      if (device != null) {
+        try {
+          await apiService.updateDeviceStatus(device['id'], state);
+          setState(() {
+            device['status'] = state;
+          });
+        } catch (e) {
+          debugPrint("API Error updating device status: $e");
+        }
       }
 
-      if (!silent) {
+      // Send to API with new format (Commands and Logs)
+      String action = state ? "Turn ON" : "Turn OFF";
+      try {
+        await apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
+        await apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
+      } catch (e) {
+        debugPrint("Error syncing logs with server: $e");
+      }
+
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("${key.replaceAll('_', ' ')}: ${state ? 'ON' : 'OFF'}"),
           backgroundColor: Colors.green,
           duration: const Duration(milliseconds: 500),
         ));
       }
+    }
+  }
+
+  // Fallback for dynamic devices not in legacy mapping
+  Future<void> _updateDeviceDynamic(dynamic device, bool state) async {
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    try {
+      final success = await apiService.updateDeviceStatus(device['id'], state);
+      if (success) {
+        setState(() {
+          device['status'] = state;
+          // Also try to update legacy map if it exists
+          String? legacyKey = _mapDeviceToLegacyKey("", device['name'] ?? "");
+          if (legacyKey != null) deviceStates[legacyKey] = state;
+        });
+        await apiService.addLog("User turned ${device['name']} ${state ? 'ON' : 'OFF'}");
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("${device['name']}: ${state ? 'ON' : 'OFF'}"),
+            backgroundColor: Colors.green,
+            duration: const Duration(milliseconds: 500),
+          ));
+        }
+      }
+    } catch (e) {
+      debugPrint("Error updating dynamic device: $e");
+    }
+  }
+
+  String? _mapDeviceToLegacyKey(String roomName, String deviceName) {
+    roomName = roomName.toLowerCase();
+    deviceName = deviceName.toLowerCase();
+    
+    if (roomName.contains("living")) {
+      if (deviceName.contains("light")) return "living_lights";
+      if (deviceName.contains("tv")) return "living_tv";
+    } else if (roomName.contains("bed")) {
+      if (deviceName.contains("light")) return "bed_lights";
+      if (deviceName.contains("fan")) return "bed_fan";
+    } else if (roomName.contains("kitchen")) {
+      if (deviceName.contains("light")) return "kitchen_lights";
+      if (deviceName.contains("coffee")) return "kitchen_coffee";
+      if (deviceName.contains("fridge")) return "kitchen_fridge";
+    }
+    
+    // Appliance mappings
+    if (deviceName.contains("ac") || deviceName.contains("air")) {
+      if (deviceName.contains("fryer")) return "air_fryer";
+      return "ac_unit";
+    }
+    if (deviceName.contains("washer") || deviceName.contains("washing")) return "washing_machine";
+    if (deviceName.contains("dryer")) return "dryer";
+    if (deviceName.contains("vacuum")) return "vacuum";
+    if (deviceName.contains("humidifier")) return "humidifier";
+    if (deviceName.contains("door")) return "front_door";
+    
+    return null;
+  }
+
+  dynamic _findDeviceByLegacyKey(String key) {
+    for (var room in _rooms) {
+      final devices = room['devices'] as List<dynamic>? ?? [];
+      for (var device in devices) {
+        if (_mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "") == key) {
+          return device;
+        }
+      }
+    }
+    return null;
+  }
+
+  IconData _getRoomIcon(String name) {
+    name = name.toLowerCase();
+    if (name.contains("living")) return Icons.weekend;
+    if (name.contains("bed")) return Icons.bed;
+    if (name.contains("kitchen")) return Icons.kitchen;
+    if (name.contains("bath")) return Icons.bathtub;
+    return Icons.room;
+  }
+
+  void _showRoomControls(int roomIndex) async {
+    final roomId = _rooms[roomIndex]['id'];
+    List<dynamic> roomDevices = _rooms[roomIndex]['devices'] ?? [];
+
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    try {
+      final updatedDevices = await apiService.getRoomDevices(roomId);
+      if (mounted) {
+        setState(() {
+          _rooms[roomIndex]['devices'] = updatedDevices;
+          roomDevices = updatedDevices;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error refreshing devices: $e");
+    }
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final room = _rooms[roomIndex];
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F1115),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            ),
+            padding: const EdgeInsets.all(25),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(room['name'] ?? "Room",
+                        style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: roomDevices.length,
+                    itemBuilder: (context, index) {
+                      final device = roomDevices[index];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 15),
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161E2E),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(_getDeviceIcon(device['type'] ?? ""), color: accentCyan),
+                                const SizedBox(width: 15),
+                                Text(device['name'] ?? "", style: const TextStyle(color: Colors.white, fontSize: 16)),
+                              ],
+                            ),
+                            Switch(
+                              value: device['status'] ?? false,
+                              activeThumbColor: accentCyan,
+                              onChanged: (val) async {
+                                final apiService = Provider.of<ApiService>(context, listen: false);
+                                final success = await apiService.updateDeviceStatus(device['id'], val);
+                                if (success) {
+                                  setModalState(() {
+                                    device['status'] = val;
+                                  });
+                                  if (mounted) {
+                                    setState(() {
+                                      String? legacyKey = _mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "");
+                                      if (legacyKey != null) deviceStates[legacyKey] = val;
+                                    });
+                                  }
+                                  apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  IconData _getDeviceIcon(String type) {
+    switch (type) {
+      case "Lights": return Icons.lightbulb_outline;
+      case "TV": return Icons.tv;
+      case "AC": return Icons.ac_unit;
+      case "Curtains": return Icons.curtains;
+      case "Fan": return Icons.air;
+      case "Door": return Icons.door_front_door;
+      case "Coffee Maker": return Icons.coffee;
+      case "Fridge": return Icons.kitchen;
+      case "Air Fryer": return Icons.outdoor_grill;
+      case "Washing Machine":
+      case "Washer": return Icons.local_laundry_service;
+      case "Dryer": return Icons.dry;
+      case "Vacuum": return Icons.cleaning_services;
+      case "Humidifier": return Icons.water_drop;
+      default: return Icons.device_hub;
     }
   }
 
@@ -94,6 +340,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showBulkFeedback(String group, bool state) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text("$group: ${state ? 'ALL ON / OPEN' : 'ALL OFF / CLOSED'}"),
       backgroundColor: state ? Colors.blue : Colors.redAccent,
@@ -102,12 +349,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _selectedIndex = 0;
-  bool _isSystemArmed = true;
-  late stt.SpeechToText _speech;
-  bool _isListening = false;
-  bool _isPassiveListening = false;
-  bool _wakeWordDetected = false;
-  String _text = "Say 'Edge' or Tap";
+
+  String _text = "Tap to Speak";
 
   // Colors & Data
   final Color gradientStart = const Color(0xFF1E293B);
@@ -120,53 +363,93 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _speech = stt.SpeechToText();
-    _initSpeech();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
     _loadInitialStates();
     _startPolling();
   }
 
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadInitialStates() async {
-    final commands = await _apiService.getCommands();
-    if (commands.isNotEmpty) {
-      setState(() {
-        for (var cmd in commands) {
-          String action = cmd['action'] ?? "";
-          // Determine state from action string: e.g. "Turn ON living_lights"
-          bool value = action.toUpperCase().contains("ON");
-          
-          // Try to find which device this belongs to
-          for(var key in deviceStates.keys) {
-            if(action.contains(key)) {
-               deviceStates[key] = value;
-            }
+    if (!mounted) return;
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    setState(() => _isLoading = true);
+    try {
+      final rooms = await apiService.getRooms();
+      List<dynamic> enrichedRooms = [];
+      for (var room in rooms) {
+        final devices = await apiService.getRoomDevices(room['id']);
+        room['devices'] = devices;
+        enrichedRooms.add(room);
+        
+        // Sync legacy deviceStates with API data
+        for (var device in devices) {
+          String? legacyKey = _mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "");
+          if (legacyKey != null) {
+            deviceStates[legacyKey] = device['status'] ?? false;
           }
         }
-      });
+      }
+
+      // Check for last commands too
+      final commands = await apiService.getCommands();
+      if (commands.isNotEmpty) {
+        for (var cmd in commands) {
+          String action = cmd['action'] ?? "";
+          bool value = action.toUpperCase().contains("ON");
+          for (var key in deviceStates.keys) {
+            if (action.contains(key)) deviceStates[key] = value;
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _rooms = enrichedRooms;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading initial states: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _startPolling() async {
+    final apiService = Provider.of<ApiService>(context, listen: false);
     // Poll for pending commands every 10 seconds (Simulating Notifications)
     while (mounted) {
       await Future.delayed(const Duration(seconds: 10));
       try {
-        final pending = await _apiService.getPendingCommands();
+        final pending = await apiService.getPendingCommands();
         if (pending.isNotEmpty && mounted) {
           for (var cmd in pending) {
             String action = cmd['action'] ?? "";
             bool state = action.toUpperCase().contains("ON");
             _showNotification(action, state);
-            await _apiService.markCommandAsExecuted(cmd['id']);
+            await apiService.markCommandAsExecuted(cmd['id']);
           }
         }
       } catch (e) {
-        print("Polling error: $e");
+        debugPrint("Polling error: $e");
       }
     }
   }
 
   void _showNotification(String name, bool state) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(
         children: [
@@ -185,215 +468,88 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _initSpeech() async {
-    try {
-      bool available = await _speech.initialize(
-        onStatus: (status) {
-          print("Speech Status: $status");
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) {
-              setState(() => _isListening = false);
-              
-              if (_wakeWordDetected) {
-                _wakeWordDetected = false;
-                print("Switching from Passive to Active...");
-                // DELAY IS CRITICAL: Let the engine reset before active listen
-                Future.delayed(const Duration(milliseconds: 500), () => _listen());
-              } else {
-                // Return to passive mode if we weren't just triggered
-                Future.delayed(const Duration(milliseconds: 1000), () {
-                  if (mounted && !_isListening && !_isPassiveListening) {
-                    _startWakeWordListener();
-                  }
-                });
-              }
-            }
-          }
-        },
-        onError: (error) {
-          print("Speech Error: $error");
-          _isPassiveListening = false;
-          _isListening = false;
-          _wakeWordDetected = false;
-          // Restart listener after a short delay on error
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) _startWakeWordListener();
-          });
-        }
-      );
-      if (available) _startWakeWordListener();
-    } catch (e) {
-      print("Speech Init Error: $e");
-    }
-  }
-
-  void _startWakeWordListener() async {
-    if (_isListening || _isPassiveListening) return;
-
-    setState(() => _isPassiveListening = true);
-    print("PASSIVE MODE: Waiting for 'Edge'...");
-    
-    _speech.listen(
-      onResult: (val) {
-        String words = val.recognizedWords.toLowerCase().trim();
-        if (words.contains("edge")) {
-          print("WAKE WORD DETECTED!");
-          _wakeWordDetected = true;
-          _isPassiveListening = false;
-          _speech.stop(); // This triggers onStatus -> 'done' -> calls _listen()
-        }
-      },
-      listenFor: const Duration(minutes: 5),
-      pauseFor: const Duration(seconds: 10),
-      partialResults: true,
-      cancelOnError: true,
-    );
-  }
-
   // --- 2. VOICE LOGIC ---
   void _listen() async {
-    if (!_isListening) {
-      // If we were in passive mode, ensure it's stopped
-      if (_isPassiveListening) {
-        _isPassiveListening = false;
-        _speech.stop();
-      }
+    final voiceProvider = Provider.of<EdgeVoiceVoiceProvider>(context, listen: false);
 
-      bool status = await _speech.initialize();
-      if (!status) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Speech recognition not available")));
-        return;
-      }
-
+    if (!voiceProvider.isRecording) {
       setState(() {
-        _isListening = true;
         _text = "Listening...";
+        _pulseController.repeat(reverse: true);
       });
-
-      // 5-SECOND AUTO TIMEOUT
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted && _isListening && _text == "Listening...") {
-          _speech.stop();
-          setState(() {
-            _isListening = false;
-            _text = "Tap to Speak";
-          });
-        }
-      });
-
-      _speech.listen(
-        listenFor: const Duration(seconds: 10), // Maximum total listen time
-        pauseFor: const Duration(seconds: 3),   // Stop after 3s of silence
-        onResult: (val) {
-          setState(() {
-            _text = val.recognizedWords;
-            if (val.finalResult) {
-              _processVoiceCommand(val.recognizedWords);
-              
-              // AUTO STOP ON FINISH
-              _speech.stop();
-              setState(() => _isListening = false);
-              
-              Future.delayed(const Duration(seconds: 2), () {
-                if (mounted) setState(() => _text = "Tap to Speak");
-              });
-            }
-          });
-        },
-      );
+      await voiceProvider.startRecording();
     } else {
-      setState(() => _isListening = false);
-      _speech.stop();
+      _pulseController.stop();
+      setState(() {
+        _text = "Processing...";
+      });
+      final result = await voiceProvider.stopAndProcess();
+      
+      if (result != null) {
+        final String? action = result['actionTriggered'];
+        final String? transcription = result['transcription'];
+        
+        if (transcription != null && transcription.isNotEmpty) {
+          setState(() => _text = transcription);
+        } else {
+          setState(() => _text = "Command received");
+        }
+
+        if (action != null && action != "UNKNOWN") {
+          _handleActionToken(action);
+        }
+      } else {
+        setState(() => _text = "Sorry, I didn't catch that.");
+      }
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _text = "Tap to Speak");
+      });
     }
   }
 
-  void _processVoiceCommand(String command) {
-    // 1. Clean up the string
-    command = command.toLowerCase().trim();
+  void _handleActionToken(String token) {
+    debugPrint("Handling Action Token: $token");
     
-    // 2. Remove "edge" if it's anywhere in the command (especially at the start)
-    command = command.replaceAll("edge", "").trim();
+    // Example tokens: "LIVING_LIGHTS_ON", "AC_OFF", etc.
+    final parts = token.split('_');
+    if (parts.length < 2) return;
 
-    if (command.isEmpty) return;
-
-    print("VOICE COMMAND RECEIVED: $command");
-
-    // Default to Toggle if user doesn't say "on" or "off"
+    final stateStr = parts.last.toUpperCase();
     bool? targetState;
-    if (command.contains("on") || command.contains("start") || command.contains("open") || command.contains("activate")) targetState = true;
-    if (command.contains("off") || command.contains("stop") || command.contains("close") || command.contains("deactivate")) targetState = false;
+    if (stateStr == "ON") targetState = true;
+    if (stateStr == "OFF") targetState = false;
 
-    // --- SMART COMMAND MATCHING ---
-    
-    // 1. Living Room
-    if (command.contains("living") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
-      _updateDevice('living_lights', targetState ?? !deviceStates['living_lights']!);
-    }
-    else if (command.contains("tv") || command.contains("television") || command.contains("screen")) {
-      _updateDevice('living_tv', targetState ?? !deviceStates['living_tv']!);
-    }
+    if (targetState == null) return;
 
-    // 2. Bedroom
-    else if (command.contains("bed") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
-      _updateDevice('bed_lights', targetState ?? !deviceStates['bed_lights']!);
-    }
-    else if (command.contains("fan") || (command.contains("bedroom") && command.contains("air"))) {
-      _updateDevice('bed_fan', targetState ?? !deviceStates['bed_fan']!);
-    }
-
-    // 3. Kitchen
-    else if (command.contains("kitchen") && (command.contains("light") || command.contains("lamp") || command.contains("bulb"))) {
-      _updateDevice('kitchen_lights', targetState ?? !deviceStates['kitchen_lights']!);
-    }
-    else if (command.contains("coffee") || command.contains("brew") || command.contains("espresso")) {
-      _updateDevice('kitchen_coffee', targetState ?? !deviceStates['kitchen_coffee']!);
-    }
-
-    // 4. Appliances & Security
-    else if (command.contains("vacuum") || command.contains("robot") || command.contains("clean")) {
-      _updateDevice('vacuum', targetState ?? !deviceStates['vacuum']!);
-    }
-    else if (command.contains("washer") || command.contains("laundry") || command.contains("washing")) {
-      _updateDevice('washer', targetState ?? !deviceStates['washer']!);
-    }
-    else if (command.contains("humidifier")) {
-      _updateDevice('humidifier', targetState ?? !deviceStates['humidifier']!);
-    }
-    else if (command.contains("door") || command.contains("gate") || command.contains("entrance")) {
-      _updateDevice('front_door', targetState ?? !deviceStates['front_door']!);
-    }
-    else if (command.contains("ac") || command.contains("air condition")) {
-      _updateDevice('ac_unit', targetState ?? !deviceStates['ac_unit']!);
-    }
-
-    // 5. Master Commands
-    if (command.contains("all lights") && (command.contains("on") || command.contains("start"))) {
-       _updateDevice('living_lights', true, silent: true);
-       _updateDevice('bed_lights', true, silent: true);
-       _updateDevice('kitchen_lights', true, silent: true);
-       _showBulkFeedback("All Lights", true);
-    }
-    else if (command.contains("all lights") && (command.contains("off") || command.contains("stop"))) {
-       _updateDevice('living_lights', false, silent: true);
-       _updateDevice('bed_lights', false, silent: true);
-       _updateDevice('kitchen_lights', false, silent: true);
-       _showBulkFeedback("All Lights", false);
-    }
-    else if (command.contains("everything off") || command.contains("goodbye") || command.contains("leaving")) {
-       _toggleSecurity(); // This turns everything off in your logic
-    }
-  }
-
-  void toggleDevice(String key) {
-    _updateDevice(key, !deviceStates[key]!);
+    // Map token to legacy keys
+    if (token.contains("LIVING_LIGHTS")) _updateDevice('living_lights', targetState);
+    if (token.contains("LIVING_TV")) _updateDevice('living_tv', targetState);
+    if (token.contains("BED_LIGHTS")) _updateDevice('bed_lights', targetState);
+    if (token.contains("BED_FAN")) _updateDevice('bed_fan', targetState);
+    if (token.contains("KITCHEN_LIGHTS")) _updateDevice('kitchen_lights', targetState);
+    if (token.contains("COFFEE")) _updateDevice('kitchen_coffee', targetState);
+    if (token.contains("FRIDGE")) _updateDevice('kitchen_fridge', targetState);
+    if (token.contains("VACUUM")) _updateDevice('vacuum', targetState);
+    if (token.contains("WASHER")) _updateDevice('washing_machine', targetState);
+    if (token.contains("DRYER")) _updateDevice('dryer', targetState);
+    if (token.contains("AIR_FRYER")) _updateDevice('air_fryer', targetState);
+    if (token.contains("HUMIDIFIER")) _updateDevice('humidifier', targetState);
+    if (token.contains("FRONT_DOOR")) _updateDevice('front_door', targetState);
+    if (token.contains("AC")) _updateDevice('ac_unit', targetState);
   }
 
   // --- NAVIGATION LOGIC ---
   final GlobalKey<LogsScreenState> _logsKey = GlobalKey<LogsScreenState>();
+  final GlobalKey<RoomsScreenState> _roomsKey = GlobalKey<RoomsScreenState>();
 
   void _onNavItemTapped(int index) {
     setState(() => _selectedIndex = index);
-    if (index == 2) {
+    if (index == 0) {
+      _loadInitialStates();
+    } else if (index == 1) {
+      _roomsKey.currentState?.fetchRooms();
+    } else if (index == 2) {
       // If switching to Logs tab, trigger refresh
       _logsKey.currentState?.refreshLogs();
     }
@@ -423,9 +579,13 @@ class _HomeScreenState extends State<HomeScreen> {
         index: _selectedIndex,
         children: [
           _buildHomeBody(),
-          const RoomsScreen(),
+          RoomsScreen(key: _roomsKey, isStandalone: false),
           LogsScreen(key: _logsKey, isStandalone: false),
-          const SettingsScreen(isStandalone: false),
+          SettingsScreen(
+            isStandalone: false,
+            profileImage: _profileImage,
+            onImageChanged: _handleImageAction,
+          ),
         ],
       ),
     );
@@ -451,107 +611,118 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 30),
               _buildMicHero(), // <--- Updated Mic Widget
               const SizedBox(height: 30),
-              const Text("Quick Actions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _QuickActionBtn(icon: Icons.lightbulb_outline, label: "Lights", onTap: _toggleLights),
-                  _QuickActionBtn(icon: Icons.door_front_door_outlined, label: "Doors", onTap: _toggleDoors),
-                  _QuickActionBtn(icon: Icons.thermostat, label: "Climate", onTap: _toggleClimate),
-                  _QuickActionBtn(icon: Icons.shield_outlined, label: "Security", onTap: _toggleSecurity),
-                ],
+              _buildAnimatedSection(
+                title: "Quick Actions",
+                delay: 200,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _QuickActionBtn(icon: Icons.lightbulb_outline, label: "Lights", onTap: _toggleLights),
+                    _QuickActionBtn(icon: Icons.door_front_door_outlined, label: "Doors", onTap: _toggleDoors),
+                    _QuickActionBtn(icon: Icons.thermostat, label: "Climate", onTap: _toggleClimate),
+                    _QuickActionBtn(icon: Icons.shield_outlined, label: "Security", onTap: _toggleSecurity),
+                  ],
+                ),
               ),
               const SizedBox(height: 30),
-              const Text("Rooms", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              _buildRoomCard(
-                  "Living Room", "6 devices active", Icons.weekend,
-                  [
-                    DeviceToggle(
-                      icon: Icons.lightbulb,
-                      label: deviceStates['living_lights']! ? "Lights On" : "Lights Off",
-                      isActive: deviceStates['living_lights']!,
-                      onTap: () => toggleDevice('living_lights'),
-                    ),
-                    DeviceToggle(
-                      icon: Icons.tv,
-                      label: deviceStates['living_tv']! ? "TV On" : "TV Off",
-                      isActive: deviceStates['living_tv']!,
-                      onTap: () => toggleDevice('living_tv'),
-                    ),
-                    TemperatureDisplay(icon: Icons.thermostat, label: "$livingRoomTemp\nClimate"),
-                  ]
-              ),
-              const SizedBox(height: 15),
-              _buildRoomCard(
-                  "Bedroom", "3 devices active", Icons.bed,
-                  [
-                    DeviceToggle(
-                      icon: Icons.lightbulb,
-                      label: deviceStates['bed_lights']! ? "Lights On" : "Lights Off",
-                      isActive: deviceStates['bed_lights']!,
-                      onTap: () => toggleDevice('bed_lights'),
-                    ),
-                    DeviceToggle(
-                      icon: Icons.air,
-                      label: deviceStates['bed_fan']! ? "Fan On" : "Fan Off",
-                      isActive: deviceStates['bed_fan']!,
-                      onTap: () => toggleDevice('bed_fan'),
-                    ),
-                    TemperatureDisplay(icon: Icons.thermostat, label: "$bedroomTemp\nClimate"),
-                  ]
-              ),
-              const SizedBox(height: 15),
-              _buildRoomCard(
-                  "Kitchen", "4 devices active", Icons.kitchen,
-                  [
-                    DeviceToggle(
-                      icon: Icons.lightbulb,
-                      label: deviceStates['kitchen_lights']! ? "Lights On" : "Lights Off",
-                      isActive: deviceStates['kitchen_lights']!,
-                      onTap: () => toggleDevice('kitchen_lights'),
-                    ),
-                    DeviceToggle(
-                      icon: Icons.coffee,
-                      label: deviceStates['kitchen_coffee']! ? "Brewing" : "Coffee Off",
-                      isActive: deviceStates['kitchen_coffee']!,
-                      onTap: () => toggleDevice('kitchen_coffee'),
-                    ),
-                    const TemperatureDisplay(icon: Icons.kitchen, label: "Fridge\nOn"),
-                  ]
+              _buildAnimatedSection(
+                title: "Rooms",
+                delay: 400,
+                child: _isLoading
+                    ? const Center(child: Padding(
+                        padding: EdgeInsets.all(20.0),
+                        child: CircularProgressIndicator(color: Color(0xFF00F0FF)),
+                      ))
+                    : _rooms.isEmpty
+                        ? Text("No rooms found. Add them in the Rooms tab.", style: TextStyle(color: Colors.grey[400]))
+                        : Column(
+                            children: _rooms.asMap().entries.map<Widget>((entry) {
+                              final room = entry.value;
+                              final roomName = room['name'] ?? "Room";
+                              final roomDevices = room['devices'] as List? ?? [];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 15.0),
+                                child: _buildRoomCard(
+                                  roomName,
+                                  "${roomDevices.length} devices active",
+                                  _getRoomIcon(roomName),
+                                  roomDevices.take(3).map<Widget>((device) {
+                                    return DeviceToggle(
+                                      icon: _getDeviceIcon(device['type'] ?? ""),
+                                      label: "${device['name']}\n${(device['status'] ?? false) ? 'On' : 'Off'}",
+                                      isActive: device['status'] ?? false,
+                                      onTap: () {
+                                        String? legacyKey = _mapDeviceToLegacyKey(roomName, device['name'] ?? "");
+                                        if (legacyKey != null) {
+                                          toggleDevice(legacyKey);
+                                        } else {
+                                          _updateDeviceDynamic(device, !(device['status'] ?? false));
+                                        }
+                                      },
+                                    );
+                                  }),
+                                  onTap: () => _showRoomControls(entry.key),
+                                ),
+                              );
+                            }).toList(),
+                          ),
               ),
               const SizedBox(height: 30),
-              const Text("Appliances", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 15,
-                mainAxisSpacing: 15,
-                childAspectRatio: 0.8,
-                children: [
-                  ApplianceCard(
-                      name: "AC Unit", 
-                      status: deviceStates['ac_unit']! ? "Cooling" : "Off", 
-                      value: acTemp, icon: Icons.ac_unit,
-                      isActive: deviceStates['ac_unit']!, 
-                      onTap: () => toggleDevice('ac_unit')
-                  ),
-                  ApplianceCard(
-                      name: "Washer", status: deviceStates['washer']! ? "Running" : "Off", value: "--", icon: Icons.local_laundry_service,
-                      isActive: deviceStates['washer']!, onTap: () => toggleDevice('washer')
-                  ),
-                  ApplianceCard(
-                      name: "Vacuum", status: deviceStates['vacuum']! ? "Cleaning" : "Docked", value: "45%", icon: Icons.cleaning_services,
-                      isActive: deviceStates['vacuum']!, isAccent: true, onTap: () => toggleDevice('vacuum')
-                  ),
-                  ApplianceCard(
-                      name: "Humidifier", status: deviceStates['humidifier']! ? "Active" : "Off", value: "52%", icon: Icons.water_drop,
-                      isActive: deviceStates['humidifier']!, onTap: () => toggleDevice('humidifier')
-                  ),
-                ],
+              _buildAnimatedSection(
+                title: "Appliances",
+                delay: 600,
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 15,
+                  mainAxisSpacing: 15,
+                  childAspectRatio: 0.8,
+                  children: [
+                    ApplianceCard(
+                        name: "Fridge",
+                        status: deviceStates['kitchen_fridge']! ? "On" : "Off",
+                        value: "4°C", icon: Icons.kitchen,
+                        isActive: deviceStates['kitchen_fridge']!,
+                        onTap: () => toggleDevice('kitchen_fridge')
+                    ),
+                    ApplianceCard(
+                        name: "Air Fryer",
+                        status: deviceStates['air_fryer']! ? "Ready" : "Off",
+                        value: "--", icon: Icons.outdoor_grill,
+                        isActive: deviceStates['air_fryer']!,
+                        onTap: () => toggleDevice('air_fryer')
+                    ),
+                    ApplianceCard(
+                        name: "Washer",
+                        status: deviceStates['washing_machine']! ? "Running" : "Off",
+                        value: "--", icon: Icons.local_laundry_service,
+                        isActive: deviceStates['washing_machine']!,
+                        onTap: () => toggleDevice('washing_machine')
+                    ),
+                    ApplianceCard(
+                        name: "Dryer",
+                        status: deviceStates['dryer']! ? "Drying" : "Off",
+                        value: "--", icon: Icons.dry,
+                        isActive: deviceStates['dryer']!,
+                        onTap: () => toggleDevice('dryer')
+                    ),
+                    ApplianceCard(
+                        name: "AC Unit",
+                        status: deviceStates['ac_unit']! ? "Cooling" : "Off",
+                        value: acTemp, icon: Icons.ac_unit,
+                        isActive: deviceStates['ac_unit']!,
+                        onTap: () => toggleDevice('ac_unit')
+                    ),
+                    ApplianceCard(
+                        name: "Vacuum",
+                        status: deviceStates['vacuum']! ? "Cleaning" : "Docked",
+                        value: "45%", icon: Icons.cleaning_services,
+                        isActive: deviceStates['vacuum']!, isAccent: true,
+                        onTap: () => toggleDevice('vacuum')
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -578,57 +749,109 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ... (Keep _buildHeader, _buildMicHero, _buildRoomCard, _buildSecurityCard exactly as they were) ...
-  // For safety, I will include _buildMicHero again since it had a small update for the listener
+  void toggleDevice(String key) {
+    _updateDevice(key, !deviceStates[key]!);
+  }
+
+  // ... (Keep _buildHeader, _buildMicHero, _buildRoomCard exactly as they were) ...
 
   Widget _buildMicHero() {
-    return GestureDetector(
-      onTap: _listen,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 40),
-        decoration: BoxDecoration(
-            color: const Color(0xFF161E2E),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: _isListening ? accentCyan : accentCyan.withValues(alpha: 0.1)),
-            boxShadow: [
-              BoxShadow(
-                  color: _isListening ? accentCyan.withValues(alpha: 0.2) : accentCyan.withValues(alpha: 0.05),
-                  blurRadius: 30,
-                  offset: const Offset(0, 10)
-              ),
-            ]
-        ),
-        child: Column(
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              height: 80,
-              width: 80,
-              decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isListening ? Colors.redAccent : accentCyan,
-                  boxShadow: [
-                    BoxShadow(color: accentCyan.withValues(alpha: 0.6), blurRadius: 40, spreadRadius: 5),
-                  ]
-              ),
-              child: Icon(_isListening ? Icons.mic_off : Icons.mic, color: Colors.black, size: 40),
+    return Consumer<EdgeVoiceVoiceProvider>(
+      builder: (context, voiceProvider, child) {
+        final isListening = voiceProvider.isRecording;
+        final isProcessing = voiceProvider.isWaitingForServer;
+        final isSpeaking = voiceProvider.isSpeaking;
+
+        return GestureDetector(
+          onTap: _listen,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            decoration: BoxDecoration(
+                color: const Color(0xFF161E2E),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: isListening ? accentCyan : (isProcessing ? Colors.orangeAccent : accentCyan.withValues(alpha: 0.1))),
+                boxShadow: [
+                  BoxShadow(
+                      color: isListening ? accentCyan.withValues(alpha: 0.2) : accentCyan.withValues(alpha: 0.05),
+                      blurRadius: 30,
+                      offset: const Offset(0, 10)
+                  ),
+                ]
             ),
-            const SizedBox(height: 20),
-            Text(_text,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)
+            child: Column(
+              children: [
+                ScaleTransition(
+                  scale: (isListening || isSpeaking) ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    height: 80,
+                    width: 80,
+                    decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isListening ? Colors.redAccent : (isProcessing ? Colors.orangeAccent : (isSpeaking ? Colors.greenAccent : accentCyan)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isListening ? Colors.redAccent.withValues(alpha: 0.6) : accentCyan.withValues(alpha: 0.6),
+                            blurRadius: (isListening || isSpeaking) ? 50 : 40,
+                            spreadRadius: (isListening || isSpeaking) ? 10 : 5
+                          ),
+                        ]
+                    ),
+                    child: Icon(
+                      isListening ? Icons.stop : (isProcessing ? Icons.sync : (isSpeaking ? Icons.volume_up : Icons.mic)), 
+                      color: Colors.black, 
+                      size: 40
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 300),
+                  style: TextStyle(
+                    color: isListening ? accentCyan : Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold
+                  ),
+                  child: Text(isProcessing ? "Processing..." : _text, textAlign: TextAlign.center),
+                ),
+                const SizedBox(height: 5),
+                if(!isListening && !isProcessing && !isSpeaking)
+                  Text('Tap to record your command', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+              ],
             ),
-            const SizedBox(height: 5),
-            if(!_isListening)
-              Text('Try: "Turn on bedroom lights"', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
   // (Paste the rest of the helper widgets: _buildHeader, _buildRoomCard, etc. from the previous successful code block here. They haven't changed logic, only context)
+  Widget _buildAnimatedSection({required String title, required int delay, required Widget child}) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: Duration(milliseconds: 600),
+      curve: Curves.easeOutQuart,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 30 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 15),
+          child,
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -650,117 +873,56 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        const CircleAvatar(
+        CircleAvatar(
           radius: 20,
-          backgroundImage: AssetImage('assets/images/rafiki.png'),
+          backgroundImage: _profileImage != null
+              ? FileImage(_profileImage!)
+              : const AssetImage('assets/images/rafiki.png') as ImageProvider,
         ),
       ],
     );
   }
 
-  Widget _buildRoomCard(String name, String status, IconData icon, List<Widget> toggles) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161E2E),
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: const Color(0xFF263345), borderRadius: BorderRadius.circular(12)),
-                child: Icon(icon, color: accentCyan, size: 24),
-              ),
-              const SizedBox(width: 15),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text(status, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-                  ],
+  Widget _buildRoomCard(String name, String status, IconData icon, Iterable<Widget> toggles, {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161E2E),
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: const Color(0xFF263345), borderRadius: BorderRadius.circular(12)),
+                  child: Icon(icon, color: accentCyan, size: 24),
                 ),
-              ),
-              Icon(Icons.arrow_forward_ios, color: accentCyan, size: 16)
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: toggles,
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSecurityCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161E2E),
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: const Color(0xFF263345), borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.shield_outlined, color: Colors.white),
-              ),
-              const SizedBox(width: 15),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("System Armed", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text("All sensors active", style: TextStyle(color: Colors.blue, fontSize: 12)),
-                  ],
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text(status, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                    ],
+                  ),
                 ),
-              ),
-              Transform.scale(
-                scale: 0.8,
-                child: Switch(
-                  value: _isSystemArmed,
-                  activeThumbColor: Colors.black,
-                  activeTrackColor: accentCyan,
-                  onChanged: (val) => setState(() => _isSystemArmed = val),
-                ),
-              )
-            ],
-          ),
-          const SizedBox(height: 15),
-          Row(
-            children: [
-              Expanded(
-                child: _SecurityStatusBtn(
-                  icon: Icons.door_back_door,
-                  label: "Front Door",
-                  status: deviceStates['front_door']! ? "Open" : "Locked",
-                  isLocked: !deviceStates['front_door']!,
-                  onTap: () => toggleDevice('front_door'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SecurityStatusBtn(
-                  icon: Icons.videocam,
-                  label: "Cameras",
-                  status: "3 Active",
-                  isLocked: false,
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cameras Info"))),
-                ),
-              ),
-            ],
-          )
-        ],
+                Icon(Icons.arrow_forward_ios, color: accentCyan, size: 16)
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: toggles.toList(),
+            )
+          ],
+        ),
       ),
     );
   }
@@ -939,46 +1101,4 @@ class ApplianceCard extends StatelessWidget {
   }
 }
 
-class _SecurityStatusBtn extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String status;
-  final bool isLocked;
-  final VoidCallback onTap;
 
-  const _SecurityStatusBtn({
-    required this.icon,
-    required this.label,
-    required this.status,
-    required this.isLocked,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isDoor = label.contains("Door");
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: const Color(0xFF0F1115), borderRadius: BorderRadius.circular(15)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: const Color(0xFF00F0FF), size: 20),
-            const SizedBox(height: 8),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
-            Text(
-              status,
-              style: TextStyle(
-                color: isDoor ? (isLocked ? Colors.greenAccent : Colors.redAccent) : const Color(0xFF00F0FF),
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

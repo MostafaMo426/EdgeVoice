@@ -1,0 +1,11 @@
+class AppConfig {
+  // Replace with your local or ngrok API URL
+  static const String apiBaseUrl = 'https://YOUR_NGROK_URL.ngrok-free.dev/api/';
+
+  // Gemini API Key
+  static const String geminiApiKey = 'YOUR_GEMINI_API_KEY';
+
+  // ElevenLabs Configuration
+  static const String elevenLabsApiKey = 'YOUR_ELEVENLABS_API_KEY';
+  static const String elevenLabsVoiceId = '21m00Tcm4TlvDq8ikWAM'; // Default: Rachel
+}

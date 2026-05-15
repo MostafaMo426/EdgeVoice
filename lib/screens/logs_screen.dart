@@ -35,8 +35,17 @@ class LogsScreenState extends State<LogsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const Color gradientStart = Color(0xFF1E293B);
+    const Color gradientEnd = Color(0xFF5270A1);
+
     return Container(
-      color: const Color(0xFF181A20),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [gradientStart, gradientEnd],
+        ),
+      ),
       child: Column(
         children: [
           const SizedBox(height: 50),

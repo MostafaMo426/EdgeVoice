@@ -73,9 +73,11 @@ class AuthService {
 
         // SAVE TOKEN AND USER ID
         String token = response.data['token'] ?? "";
+        String refreshToken = response.data['refreshToken'] ?? "";
         int userId = response.data['userId'] ?? 1; // Default to 1 if not provided
         
         await prefs.setString('token', token);
+        await prefs.setString('refreshToken', refreshToken);
         await prefs.setInt('userId', userId);
         await prefs.setBool('isLoggedIn', true);
         
