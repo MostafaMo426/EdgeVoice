@@ -120,8 +120,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
 
                                 // --- LOGO SIZE INCREASED HERE (120) ---
                                 Image.asset(
-                                  'assets/images/Logo.jpg',
-                                  height: 120,
+                                  'assets/images/Logo.png',
+                                  height: 150,
                                   fit: BoxFit.contain,
                                   alignment: Alignment.centerLeft,
                                 ),

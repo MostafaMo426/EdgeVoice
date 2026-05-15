@@ -31,9 +31,9 @@ class WelcomeScreen extends StatelessWidget {
 
                 // --- LOGO REPLACES TEXT HERE ---
                 Image.asset(
-                  'assets/images/Logo.jpg', // Make sure this matches your file path
-                  height: 200,              // Adjust this number to make the logo bigger/smaller
-                  width: 200,
+                  'assets/images/Logo.png', // Make sure this matches your file path
+                  height: 350,              // Adjust this number to make the logo bigger/smaller
+                  width: 350,
                   fit: BoxFit.contain,      // Keeps the logo aspect ratio correct
                 ),
 
