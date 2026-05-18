@@ -2,11 +2,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'settings_screen.dart'; 
 import 'logs_screen.dart'; // Import Logs Screen
 import 'rooms_screen.dart'; // Import Rooms Screen
 import '../services/api_service.dart'; // Import API Service
 import '../providers/edgevoice_voice_provider.dart';
+import '../config.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -40,23 +42,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   List<dynamic> _rooms = [];
   bool _isLoading = true;
 
-  File? _profileImage;
+  File? _profileImage; // For locally picked image preview if needed
+  String? _profileImageUrl;
   final ImagePicker _picker = ImagePicker();
 
-  Future<void> _handleImageAction(ImageSource? source) async {
-    if (source == null) {
-      setState(() => _profileImage = null);
-      return;
-    }
-    try {
-      final pickedFile = await _picker.pickImage(source: source);
-      if (pickedFile != null) {
-        setState(() {
-          _profileImage = File(pickedFile.path);
-        });
-      }
-    } catch (e) {
-      debugPrint("Error picking image: $e");
+  @override
+  void initState() {
+    super.initState();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _loadInitialStates();
+    _loadProfileImage();
+    _startPolling();
+  }
+
+  Future<void> _loadProfileImage() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _profileImageUrl = prefs.getString('profilePicture');
+      });
     }
   }
 
@@ -74,7 +86,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         try {
           await apiService.updateDeviceStatus(device['id'], state);
           setState(() {
-            device['status'] = state;
+            device['isOn'] = state;
+          device['status'] = state;
           });
         } catch (e) {
           debugPrint("API Error updating device status: $e");
@@ -107,6 +120,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final success = await apiService.updateDeviceStatus(device['id'], state);
       if (success) {
         setState(() {
+          device['isOn'] = state;
           device['status'] = state;
           // Also try to update legacy map if it exists
           String? legacyKey = _mapDeviceToLegacyKey("", device['name'] ?? "");
@@ -250,13 +264,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               ],
                             ),
                             Switch(
-                              value: device['status'] ?? false,
+                                  value: device['isOn'] ?? device['status'] ?? false,
                               activeThumbColor: accentCyan,
                               onChanged: (val) async {
                                 final apiService = Provider.of<ApiService>(context, listen: false);
                                 final success = await apiService.updateDeviceStatus(device['id'], val);
                                 if (success) {
                                   setModalState(() {
+                                    device['isOn'] = val;
                                     device['status'] = val;
                                   });
                                   if (mounted) {
@@ -361,22 +376,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String acTemp = "68°F";
 
   @override
-  void initState() {
-    super.initState();
-
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-
-    _loadInitialStates();
-    _startPolling();
-  }
-
-  @override
   void dispose() {
     _pulseController.dispose();
     super.dispose();
@@ -398,7 +397,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         for (var device in devices) {
           String? legacyKey = _mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "");
           if (legacyKey != null) {
-            deviceStates[legacyKey] = device['status'] ?? false;
+            deviceStates[legacyKey] = device['isOn'] ?? device['status'] ?? false;
           }
         }
       }
@@ -487,12 +486,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       
       if (result != null) {
         final String? action = result['actionTriggered'];
-        final String? transcription = result['transcription'];
+        final String? transcription = result['transcription'] ?? result['text']; // Try both common keys
         
         if (transcription != null && transcription.isNotEmpty) {
           setState(() => _text = transcription);
         } else {
-          setState(() => _text = "Command received");
+          setState(() => _text = "Command recognized");
         }
 
         if (action != null && action != "UNKNOWN") {
@@ -502,8 +501,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         setState(() => _text = "Sorry, I didn't catch that.");
       }
 
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _text = "Tap to Speak");
+      // Keep the result visible for longer (5 seconds)
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _text != "Listening...") {
+          setState(() => _text = "Tap to Speak");
+        }
       });
     }
   }
@@ -583,8 +585,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           LogsScreen(key: _logsKey, isStandalone: false),
           SettingsScreen(
             isStandalone: false,
-            profileImage: _profileImage,
-            onImageChanged: _handleImageAction,
+            onImageChanged: (source) {
+              // Trigger a refresh when settings signals an image change
+              _loadProfileImage();
+            },
           ),
         ],
       ),
@@ -649,14 +653,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                   roomDevices.take(3).map<Widget>((device) {
                                     return DeviceToggle(
                                       icon: _getDeviceIcon(device['type'] ?? ""),
-                                      label: "${device['name']}\n${(device['status'] ?? false) ? 'On' : 'Off'}",
-                                      isActive: device['status'] ?? false,
+                                      label: "${device['name']}\n${(device['isOn'] ?? device['status'] ?? false) ? 'On' : 'Off'}",
+                                      isActive: device['isOn'] ?? device['status'] ?? false,
                                       onTap: () {
                                         String? legacyKey = _mapDeviceToLegacyKey(roomName, device['name'] ?? "");
                                         if (legacyKey != null) {
                                           toggleDevice(legacyKey);
                                         } else {
-                                          _updateDeviceDynamic(device, !(device['status'] ?? false));
+                                          _updateDeviceDynamic(device, !(device['isOn'] ?? device['status'] ?? false));
                                         }
                                       },
                                     );
@@ -853,6 +857,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildHeader() {
+    // Helper to format the image URL
+    String? fullImageUrl;
+    if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
+      fullImageUrl = _profileImageUrl!.startsWith('http') 
+          ? _profileImageUrl 
+          : "${AppConfig.apiBaseUrl.replaceAll('/api/', '')}/$_profileImageUrl";
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -873,11 +885,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
           ],
         ),
-        CircleAvatar(
-          radius: 20,
-          backgroundImage: _profileImage != null
-              ? FileImage(_profileImage!)
-              : const AssetImage('assets/images/rafiki.png') as ImageProvider,
+        GestureDetector(
+          onTap: () {
+            setState(() => _selectedIndex = 3); // Switch to Settings tab
+          },
+          child: CircleAvatar(
+            radius: 20,
+            backgroundColor: accentCyan.withValues(alpha: 0.1),
+            backgroundImage: fullImageUrl != null
+                ? NetworkImage(fullImageUrl)
+                : const AssetImage('assets/images/rafiki.png') as ImageProvider,
+          ),
         ),
       ],
     );

@@ -213,9 +213,16 @@ class RoomsScreenState extends State<RoomsScreen> {
     );
   }
 
-  void _showRoomControls(int roomIndex) async {
+  Future<void> _showRoomControls(int roomIndex) async {
     final roomId = _rooms[roomIndex]['id'];
-    List<dynamic> roomDevices = await _apiService.getRoomDevices(roomId);
+    List<dynamic> roomDevices = [];
+    
+    // Show loading indicator or handle it before modal
+    try {
+      roomDevices = await _apiService.getRoomDevices(roomId);
+    } catch (e) {
+      print("Error loading room devices: $e");
+    }
 
     if (!mounted) return;
 
@@ -273,12 +280,13 @@ class RoomsScreenState extends State<RoomsScreen> {
                             Row(
                               children: [
                                 Switch(
-                                  value: device['status'] ?? false,
+                                  value: device['isOn'] ?? device['status'] ?? false,
                                   activeThumbColor: accentCyan,
                                   onChanged: (val) async {
                                     final success = await _apiService.updateDeviceStatus(device['id'], val);
                                     if (success) {
                                       setModalState(() {
+                                        device['isOn'] = val;
                                         device['status'] = val;
                                       });
                                       _apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");

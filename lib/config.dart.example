@@ -1,6 +1,6 @@
 class AppConfig {
-  // Replace with your local or ngrok API URL
-  static const String apiBaseUrl = 'https://YOUR_NGROK_URL.ngrok-free.dev/api/';
+  // Production API URL on Smarter ASP
+  static const String apiBaseUrl = 'http://asmaaelamir-001-site1.site4future.com/api/';
 
   // Gemini API Key
   static const String geminiApiKey = 'YOUR_GEMINI_API_KEY';

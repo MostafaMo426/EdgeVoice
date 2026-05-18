@@ -2,11 +2,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../providers/device_pairing_provider.dart';
 import 'pairing_screen.dart';
 import 'welcome_screen.dart';
 import 'privacy_screen.dart';
+import '../config.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isStandalone;
@@ -25,6 +27,41 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final AuthService _authService = AuthService();
+  String _userName = "Loading...";
+  String _userEmail = "Loading...";
+  String? _profileImageUrl;
+  bool _isLoadingProfile = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userName = prefs.getString('fullName') ?? "User";
+      _userEmail = prefs.getString('email') ?? "No Email";
+      _profileImageUrl = prefs.getString('profilePicture');
+      _isLoadingProfile = false;
+    });
+
+    // Optionally refresh from API
+    final profile = await _authService.getUserProfile();
+    if (profile != null && mounted) {
+      setState(() {
+        _userName = profile['fullName'] ?? _userName;
+        _userEmail = profile['email'] ?? _userEmail;
+        _profileImageUrl = profile['profilePicture'] ?? _profileImageUrl;
+      });
+      if (profile['profilePicture'] != null) {
+        await prefs.setString('profilePicture', profile['profilePicture']);
+      }
+    }
+  }
+
   void _showImageSourceActionSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -39,37 +76,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               leading: const Icon(Icons.photo_library, color: Colors.white),
               title: const Text("Gallery", style: TextStyle(color: Colors.white)),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                widget.onImageChanged?.call(ImageSource.gallery);
+                final picker = ImagePicker();
+                final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                if (pickedFile != null) {
+                  _uploadImage(File(pickedFile.path));
+                }
               },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Colors.white),
               title: const Text("Camera", style: TextStyle(color: Colors.white)),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                widget.onImageChanged?.call(ImageSource.camera);
+                final picker = ImagePicker();
+                final pickedFile = await picker.pickImage(source: ImageSource.camera);
+                if (pickedFile != null) {
+                  _uploadImage(File(pickedFile.path));
+                }
               },
             ),
-            if (widget.profileImage != null)
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.redAccent),
-                title: const Text("Remove Picture", style: TextStyle(color: Colors.redAccent)),
-                onTap: () {
-                  Navigator.pop(context);
-                  widget.onImageChanged?.call(null);
-                },
-              ),
           ],
         ),
       ),
     );
   }
 
+  Future<void> _uploadImage(File file) async {
+    setState(() => _isLoadingProfile = true);
+    final result = await _authService.uploadProfileImage(file);
+    
+    if (!mounted) return;
+
+    if (result != null) {
+      String? updatedUrl;
+      
+      if (result == "UPLOAD_SUCCESS") {
+        // If server returns no URL, we try to fetch profile to see if it updated
+        final profile = await _authService.getUserProfile();
+        updatedUrl = profile?['profilePicture'];
+      } else {
+        updatedUrl = result;
+      }
+
+      if (updatedUrl != null) {
+        // Add timestamp to force image refresh in Flutter
+        final refreshedUrl = updatedUrl.contains('?') 
+            ? "$updatedUrl&t=${DateTime.now().millisecondsSinceEpoch}" 
+            : "$updatedUrl?t=${DateTime.now().millisecondsSinceEpoch}";
+            
+        setState(() {
+          _profileImageUrl = refreshedUrl;
+          _isLoadingProfile = false;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('profilePicture', refreshedUrl);
+        
+        // Notify parent if callback provided
+        if (widget.onImageChanged != null) {
+          widget.onImageChanged!(null);
+        }
+      } else {
+        setState(() => _isLoadingProfile = false);
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Profile picture updated")),
+        );
+      }
+    } else {
+      setState(() => _isLoadingProfile = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to upload image")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final AuthService authService = AuthService();
     const Color gradientStart = Color(0xFF1E293B);
     const Color gradientEnd = Color(0xFF5270A1);
     const Color accentCyan = Color(0xFF00F0FF);
@@ -146,10 +234,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                           ),
                           onPressed: () async {
-                            await authService.signOut();
-                            if (context.mounted) {
-                              Navigator.pushAndRemoveUntil(
-                                context,
+                            // 1. Clear local session
+                            await _authService.signOut();
+                            
+                            // 2. Navigate and clear the navigation stack
+                            if (mounted) {
+                              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                                 MaterialPageRoute(builder: (context) => const WelcomeScreen()),
                                 (route) => false,
                               );
@@ -207,6 +297,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildProfileCard(BuildContext context, Color accent) {
+    // Helper to format the image URL
+    String? fullImageUrl;
+    if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
+      fullImageUrl = _profileImageUrl!.startsWith('http') 
+          ? _profileImageUrl 
+          : "${AppConfig.apiBaseUrl.replaceAll('/api/', '')}/$_profileImageUrl";
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -223,9 +321,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   CircleAvatar(
                     radius: 35,
                     backgroundColor: accent.withValues(alpha: 0.2),
-                    backgroundImage: widget.profileImage != null
-                        ? FileImage(widget.profileImage!)
-                        : const NetworkImage("https://i.pravatar.cc/150?u=edgevoice_user") as ImageProvider,
+                    backgroundImage: fullImageUrl != null
+                        ? NetworkImage(fullImageUrl)
+                        : (widget.profileImage != null
+                            ? FileImage(widget.profileImage!)
+                            : const AssetImage('assets/images/rafiki.png') as ImageProvider),
+                    child: _isLoadingProfile 
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : null,
                   ),
                   Positioned(
                     bottom: 0,
@@ -245,24 +348,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
               const SizedBox(width: 20),
-              const Column(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Alex Johnson", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text("Age: 28", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  Text(_userName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text("Smart Home User", style: TextStyle(color: Colors.grey, fontSize: 14)),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 20),
-          _buildProfileItem(context, Icons.email_outlined, "Email", "alex.j@edgevoice.ai"),
+          _buildProfileItem(context, Icons.person_outline, "Name", _userName),
+          _buildProfileItem(context, Icons.email_outlined, "Email", _userEmail, canChange: false),
           _buildProfileItem(context, Icons.lock_outline, "Password", "••••••••", isPassword: true),
         ],
       ),
     );
   }
 
-  Widget _buildProfileItem(BuildContext context, IconData icon, String label, String value, {bool isPassword = false}) {
+  Widget _buildProfileItem(BuildContext context, IconData icon, String label, String value, {bool isPassword = false, bool canChange = true}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -278,45 +382,195 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-          TextButton(
-            onPressed: () => _showEditDialog(context, label, value),
-            child: const Text("Change", style: TextStyle(color: Color(0xFF00F0FF))),
-          ),
+          if (canChange)
+            TextButton(
+              onPressed: () {
+                if (isPassword) {
+                  _showChangePasswordDialog(context);
+                } else {
+                  _showEditDialog(context, label, value);
+                }
+              },
+              child: const Text("Change", style: TextStyle(color: Color(0xFF00F0FF))),
+            ),
         ],
+      ),
+    );
+  }
+
+  void _showChangePasswordDialog(BuildContext context) {
+    final TextEditingController oldPasswordController = TextEditingController();
+    final TextEditingController newPasswordController = TextEditingController();
+    final TextEditingController confirmPasswordController = TextEditingController();
+    String? errorMessage;
+    bool isVerifying = false;
+    bool isOldPasswordCorrect = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            title: const Text("Change Password", style: TextStyle(color: Colors.white)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: oldPasswordController,
+                  obscureText: true,
+                  enabled: !isOldPasswordCorrect,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Old Password",
+                    labelStyle: const TextStyle(color: Colors.grey),
+                    errorText: errorMessage,
+                    errorStyle: const TextStyle(color: Colors.redAccent),
+                    enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  ),
+                ),
+                if (isOldPasswordCorrect) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: "New Password",
+                      labelStyle: TextStyle(color: Colors.grey),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: "Confirm New Password",
+                      labelStyle: TextStyle(color: Colors.grey),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              ElevatedButton(
+                onPressed: isVerifying ? null : () async {
+                  if (!isOldPasswordCorrect) {
+                    setModalState(() {
+                      isVerifying = true;
+                      errorMessage = null;
+                    });
+                    
+                    // Here we check password by attempting a "change" with same password or a dedicated check endpoint
+                    // Since the requirement says "check it from the database", we use our changePassword logic
+                    // If it returns "The password is incorrect", we show the alert.
+                    final result = await _authService.changePassword(oldPasswordController.text, oldPasswordController.text);
+                    
+                    setModalState(() {
+                      isVerifying = false;
+                      if (result['message'] == 'The password is incorrect') {
+                        errorMessage = "The password is incorrect";
+                      } else {
+                        // If it succeeded or returned something else, we consider it "correct" for the UI flow
+                        isOldPasswordCorrect = true;
+                      }
+                    });
+                  } else {
+                    if (newPasswordController.text != confirmPasswordController.text) {
+                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+                       return;
+                    }
+                    final result = await _authService.changePassword(oldPasswordController.text, newPasswordController.text);
+                    if (result['success']) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Password updated successfully")));
+                    } else {
+                      setModalState(() {
+                        errorMessage = result['message'];
+                      });
+                    }
+                  }
+                },
+                child: isVerifying 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
+                  : Text(isOldPasswordCorrect ? "Update" : "Verify"),
+              ),
+            ],
+          );
+        }
       ),
     );
   }
 
   void _showEditDialog(BuildContext context, String field, String currentValue) {
     final TextEditingController controller = TextEditingController(text: field == "Password" ? "" : currentValue);
+    bool isSaving = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: Text("Change $field", style: const TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          obscureText: field == "Password",
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: "Enter new $field",
-            hintStyle: const TextStyle(color: Colors.grey),
-            enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: Implement actual API update logic
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("$field updated (Simulation)")),
-              );
-            },
-            child: const Text("Update"),
-          ),
-        ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            title: Text("Change $field", style: const TextStyle(color: Colors.white)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  obscureText: field == "Password",
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: "Enter new $field",
+                    hintStyle: const TextStyle(color: Colors.grey),
+                    enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  ),
+                ),
+                if (isSaving)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 15),
+                    child: LinearProgressIndicator(color: Color(0xFF00F0FF)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              ElevatedButton(
+                onPressed: isSaving ? null : () async {
+                  if (controller.text.trim().isEmpty) return;
+
+                  setModalState(() => isSaving = true);
+                  
+                  bool success = false;
+                  if (field == "Email") {
+                    // Usually email isn't changeable this easily, but if the API supports it:
+                    // success = await _authService.updateProfile(email: controller.text.trim());
+                  } else if (field == "Name") {
+                    success = await _authService.updateProfile(fullName: controller.text.trim());
+                  }
+
+                  if (success) {
+                    await _loadUserData();
+                    if (mounted) Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("$field updated successfully")),
+                    );
+                  } else {
+                    setModalState(() => isSaving = false);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Failed to update $field")),
+                    );
+                  }
+                },
+                child: const Text("Update"),
+              ),
+            ],
+          );
+        }
       ),
     );
   }
@@ -393,7 +647,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           _buildUpdateItem("Firmware v2.4.0", "New voice triggers and improved latency.", "2 days ago"),
           const Divider(color: Colors.white10, height: 25),
-          _buildUpdateItem("Security Patch", "Updated encryption for local bypass mode.", "1 week ago"),
+          _buildUpdateItem("Security Patch", "Improved encryption for user data protection.", "1 week ago"),
         ],
       ),
     );

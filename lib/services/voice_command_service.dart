@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
 
@@ -25,15 +27,26 @@ class VoiceCommandService {
         return client;
       };
     }
+
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token');
+        if (token != null && token.isNotEmpty) {
+          options.headers['Authorization'] = 'Bearer $token';
+        }
+        return handler.next(options);
+      },
+    ));
   }
 
   Future<void> startRecording() async {
     if (await _recorder.hasPermission()) {
       final directory = await getApplicationDocumentsDirectory();
-      final path = '${directory.path}/voice_cmd.raw';
+      final path = '${directory.path}/voice_cmd.wav';
       
       const config = RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
+        encoder: AudioEncoder.wav,
         sampleRate: 16000,
         numChannels: 1,
       );
@@ -53,20 +66,32 @@ class VoiceCommandService {
       final bytes = await file.readAsBytes();
       
       final formData = FormData.fromMap({
-        'audio': MultipartFile.fromBytes(bytes, filename: 'command.raw'),
+        'audio': MultipartFile.fromBytes(bytes, filename: 'command.wav'),
       });
 
-      // Using AppConfig.apiBaseUrl + 'command'
+      // Updated to match Swagger: /api/Audio/upload
       final response = await _dio.post(
-        'command',
+        'Audio/upload',
         data: formData,
       );
 
       if (response.statusCode == 200) {
-        return response.data;
+        if (response.data is Map<String, dynamic>) {
+          return response.data;
+        } else if (response.data is String) {
+          try {
+            return jsonDecode(response.data);
+          } catch (e) {
+            return {'transcription': response.data};
+          }
+        }
       }
     } catch (e) {
-      print("Error uploading audio: $e");
+      if (e is DioException && e.response != null) {
+        print("Error uploading audio: ${e.response?.statusCode} - ${e.response?.data}");
+      } else {
+        print("Error uploading audio: $e");
+      }
     }
     return null;
   }

@@ -11,13 +11,16 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   bool _isRecording = false;
   bool _isWaitingForServer = false;
   bool _isSpeaking = false;
+  String? _lastTranscription;
 
   bool get isRecording => _isRecording;
   bool get isWaitingForServer => _isWaitingForServer;
   bool get isSpeaking => _isSpeaking;
+  String? get lastTranscription => _lastTranscription;
 
   Future<void> startRecording() async {
     _isRecording = true;
+    _lastTranscription = null;
     notifyListeners();
     await _voiceService.startRecording();
   }
@@ -33,9 +36,11 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     if (path != null) {
       result = await _voiceService.uploadAudio(path);
       _isWaitingForServer = false;
-      notifyListeners();
-
+      
       if (result != null) {
+        _lastTranscription = result['transcription'] ?? result['text'];
+        notifyListeners();
+
         final String? actionTriggered = result['actionTriggered'];
         final String? aiReply = result['aiReply'];
 
