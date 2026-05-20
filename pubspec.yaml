@@ -19,10 +19,12 @@ dependencies:
   speech_to_text: ^7.0.0
   permission_handler: ^11.3.1
   image_picker: ^1.1.2
-  record: ^5.2.0
+  record: ^6.2.0
   audioplayers: ^6.1.0
   path_provider: ^2.1.5
   shared_preferences: ^2.3.5
+  animations: ^2.0.11
+  http_parser: ^4.1.2
 
 dev_dependencies:
   flutter_launcher_icons: ^0.13.1
@@ -33,7 +35,7 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/Logo.jpg"
+  image_path: "assets/images/Logo.png"
   min_sdk_android: 21
 
 flutter:

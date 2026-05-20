@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:animations/animations.dart';
 import 'create_account_screen.dart';
 import 'login_screen.dart';
 
@@ -29,50 +30,61 @@ class WelcomeScreen extends StatelessWidget {
               children: [
                 const Spacer(),
 
-                // --- LOGO REPLACES TEXT HERE ---
-                Image.asset(
-                  'assets/images/Logo.png', // Make sure this matches your file path
-                  height: 350,              // Adjust this number to make the logo bigger/smaller
-                  width: 350,
-                  fit: BoxFit.contain,      // Keeps the logo aspect ratio correct
+                // --- LOGO WITH HERO MORPH ---
+                Hero(
+                  tag: 'app_logo',
+                  child: Image.asset(
+                    'assets/images/Logo.png',
+                    height: 350,
+                    width: 350,
+                    fit: BoxFit.contain,
+                  ),
                 ),
 
                 const Spacer(),
 
-                // Create Account Button (Cyan Accent)
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const CreateAccountScreen()),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentCyan,
-                    foregroundColor: Colors.black, // Dark text on bright button
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                // Create Account Button (OpenContainer Morph)
+                OpenContainer(
+                  closedElevation: 0,
+                  openElevation: 0,
+                  closedColor: Colors.transparent,
+                  openColor: gradientStart,
+                  transitionType: ContainerTransitionType.fadeThrough,
+                  closedBuilder: (context, action) => ElevatedButton(
+                    onPressed: action,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentCyan,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: const Text("Create Account", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
-                  child: const Text("Create Account", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  openBuilder: (context, action) => const CreateAccountScreen(),
                 ),
+                
                 const SizedBox(height: 20),
 
-                // Login Button (Dark with Border)
-                OutlinedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const LoginScreen()),
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: accentCyan),
-                    minimumSize: const Size(double.infinity, 50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                // Login Button (OpenContainer Morph)
+                OpenContainer(
+                  closedElevation: 0,
+                  openElevation: 0,
+                  closedColor: Colors.transparent,
+                  openColor: gradientStart,
+                  transitionType: ContainerTransitionType.fadeThrough,
+                  closedBuilder: (context, action) => OutlinedButton(
+                    onPressed: action,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: accentCyan),
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: const Text("Login", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
-                  child: const Text("Login", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  openBuilder: (context, action) => const LoginScreen(),
                 ),
+
                 const Spacer(),
               ],
             ),

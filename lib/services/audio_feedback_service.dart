@@ -1,6 +1,8 @@
 import 'dart:typed_data';
+import 'dart:developer' as developer;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../config.dart';
 
 class AudioFeedbackService {
@@ -38,7 +40,7 @@ class AudioFeedbackService {
         await _audioPlayer.play(BytesSource(audioBytes));
       }
     } catch (e) {
-      print("Error in ElevenLabs TTS: $e");
+      developer.log("Error in ElevenLabs TTS", error: e);
     }
   }
 

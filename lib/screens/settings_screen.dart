@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,7 +11,7 @@ import '../config.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isStandalone;
-  final File? profileImage;
+  final XFile? profileImage;
   final Function(ImageSource?)? onImageChanged;
 
   const SettingsScreen({
@@ -51,25 +50,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Optionally refresh from API
     final profile = await _authService.getUserProfile();
     if (profile != null && mounted) {
+      final String? apiProfilePic = profile['imagePath'] ?? profile['imageUrl'] ?? profile['profilePicture'] ?? profile['ProfilePicture'];
+      
       setState(() {
-        _userName = profile['fullName'] ?? _userName;
-        _userEmail = profile['email'] ?? _userEmail;
-        _profileImageUrl = profile['profilePicture'] ?? _profileImageUrl;
+        _userName = profile['fullName'] ?? profile['FullName'] ?? _userName;
+        _userEmail = profile['email'] ?? profile['Email'] ?? _userEmail;
+        _profileImageUrl = apiProfilePic ?? _profileImageUrl;
       });
-      if (profile['profilePicture'] != null) {
-        await prefs.setString('profilePicture', profile['profilePicture']);
+      if (apiProfilePic != null) {
+        await prefs.setString('profilePicture', apiProfilePic);
       }
     }
   }
 
   void _showImageSourceActionSheet(BuildContext context) {
+    print(">>> [UI] Opening Image Source Sheet");
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E293B),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
       ),
-      builder: (context) => SafeArea(
+      builder: (bottomSheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -77,11 +79,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.photo_library, color: Colors.white),
               title: const Text("Gallery", style: TextStyle(color: Colors.white)),
               onTap: () async {
-                Navigator.pop(context);
-                final picker = ImagePicker();
-                final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-                if (pickedFile != null) {
-                  _uploadImage(File(pickedFile.path));
+                print(">>> [UI] Gallery Tapped");
+                Navigator.pop(bottomSheetContext);
+                try {
+                  final picker = ImagePicker();
+                  final pickedFile = await picker.pickImage(
+                    source: ImageSource.gallery,
+                    maxWidth: 1000,
+                    maxHeight: 1000,
+                  );
+                  if (pickedFile != null) {
+                    print(">>> [UI] Image Selected: ${pickedFile.name}");
+                    _uploadImage(pickedFile);
+                  } else {
+                    print(">>> [UI] Picking Cancelled");
+                  }
+                } catch (e) {
+                  print(">>> [UI] Picking Error: $e");
                 }
               },
             ),
@@ -89,11 +103,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.camera_alt, color: Colors.white),
               title: const Text("Camera", style: TextStyle(color: Colors.white)),
               onTap: () async {
-                Navigator.pop(context);
-                final picker = ImagePicker();
-                final pickedFile = await picker.pickImage(source: ImageSource.camera);
-                if (pickedFile != null) {
-                  _uploadImage(File(pickedFile.path));
+                print(">>> [UI] Camera Tapped");
+                Navigator.pop(bottomSheetContext);
+                try {
+                  final picker = ImagePicker();
+                  final pickedFile = await picker.pickImage(
+                    source: ImageSource.camera,
+                    maxWidth: 1000,
+                    maxHeight: 1000,
+                  );
+                  if (pickedFile != null) {
+                    print(">>> [UI] Image Captured: ${pickedFile.name}");
+                    _uploadImage(pickedFile);
+                  }
+                } catch (e) {
+                  print(">>> [UI] Camera Error: $e");
                 }
               },
             ),
@@ -103,55 +127,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _uploadImage(File file) async {
+  Future<void> _uploadImage(XFile file) async {
+    print(">>> [UI] _uploadImage called for ${file.name}");
     setState(() => _isLoadingProfile = true);
-    final result = await _authService.uploadProfileImage(file);
     
-    if (!mounted) return;
-
-    if (result != null) {
-      String? updatedUrl;
+    try {
+      final result = await _authService.uploadProfileImage(file);
       
-      if (result == "UPLOAD_SUCCESS") {
-        // If server returns no URL, we try to fetch profile to see if it updated
-        final profile = await _authService.getUserProfile();
-        updatedUrl = profile?['profilePicture'];
-      } else {
-        updatedUrl = result;
-      }
+      if (!mounted) return;
 
-      if (updatedUrl != null) {
-        // Add timestamp to force image refresh in Flutter
-        final refreshedUrl = updatedUrl.contains('?') 
-            ? "$updatedUrl&t=${DateTime.now().millisecondsSinceEpoch}" 
-            : "$updatedUrl?t=${DateTime.now().millisecondsSinceEpoch}";
-            
-        setState(() {
-          _profileImageUrl = refreshedUrl;
-          _isLoadingProfile = false;
-        });
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('profilePicture', refreshedUrl);
+      if (result != null) {
+        String? updatedUrl;
         
-        // Notify parent if callback provided
-        if (widget.onImageChanged != null) {
-          widget.onImageChanged!(null);
+        if (result == "UPLOAD_SUCCESS") {
+          final profile = await _authService.getUserProfile();
+          updatedUrl = profile?['imagePath'] ?? profile?['imageUrl'] ?? profile?['profilePicture'] ?? profile?['ProfilePicture'];
+        } else {
+          updatedUrl = result;
+        }
+
+        if (updatedUrl != null) {
+          final refreshedUrl = updatedUrl.contains('?') 
+              ? "$updatedUrl&t=${DateTime.now().millisecondsSinceEpoch}" 
+              : "$updatedUrl?t=${DateTime.now().millisecondsSinceEpoch}";
+              
+          setState(() {
+            _profileImageUrl = refreshedUrl;
+          });
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('profilePicture', refreshedUrl);
+          
+          if (widget.onImageChanged != null) {
+            widget.onImageChanged!(null);
+          }
+        }
+        
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Profile picture updated")),
+          );
         }
       } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to upload image")),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("[DEBUG] SettingsScreen Upload Error: $e");
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Upload error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isLoadingProfile = false);
-      }
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Profile picture updated")),
-        );
-      }
-    } else {
-      setState(() => _isLoadingProfile = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Failed to upload image")),
-        );
       }
     }
   }
@@ -238,7 +270,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             await _authService.signOut();
                             
                             // 2. Navigate and clear the navigation stack
-                            if (mounted) {
+                            if (context.mounted) {
                               Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                                 MaterialPageRoute(builder: (context) => const WelcomeScreen()),
                                 (route) => false,
@@ -300,9 +332,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Helper to format the image URL
     String? fullImageUrl;
     if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
-      fullImageUrl = _profileImageUrl!.startsWith('http') 
-          ? _profileImageUrl 
-          : "${AppConfig.apiBaseUrl.replaceAll('/api/', '')}/$_profileImageUrl";
+      // 1. Convert backslashes to forward slashes
+      String path = _profileImageUrl!.replaceAll('\\', '/');
+      
+      // 2. Remove 'wwwroot/' or 'www/' if the server included it in the path
+      if (path.startsWith('wwwroot/')) path = path.substring(8);
+      if (path.startsWith('www/')) path = path.substring(4);
+      
+      if (path.startsWith('http')) {
+        fullImageUrl = path;
+      } else {
+        // 3. Build the base URL (remove /api/ from the end)
+        String baseUrl = AppConfig.apiBaseUrl.split('/api/')[0];
+        if (baseUrl.endsWith('/')) baseUrl = baseUrl.substring(0, baseUrl.length - 1);
+        
+        // 4. Ensure path starts with a single /
+        if (!path.startsWith('/')) path = "/$path";
+        
+        fullImageUrl = "$baseUrl$path";
+      }
+      debugPrint("[DEBUG] Final Profile Image URL: $fullImageUrl");
     }
 
     return Container(
@@ -318,23 +367,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Stack(
                 children: [
-                  CircleAvatar(
-                    radius: 35,
-                    backgroundColor: accent.withValues(alpha: 0.2),
-                    backgroundImage: fullImageUrl != null
-                        ? NetworkImage(fullImageUrl)
-                        : (widget.profileImage != null
-                            ? FileImage(widget.profileImage!)
-                            : const AssetImage('assets/images/rafiki.png') as ImageProvider),
-                    child: _isLoadingProfile 
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : null,
+                  Hero(
+                    tag: 'profile_pic',
+                    child: Container(
+                      width: 70,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: accent.withValues(alpha: 0.2),
+                      ),
+                      child: ClipOval(
+                        child: _isLoadingProfile
+                            ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : (fullImageUrl != null
+                                ? Image.network(
+                                    fullImageUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      debugPrint("Image Load Error: $error for URL: $fullImageUrl");
+                                      return Image.network(AppConfig.defaultProfilePic, fit: BoxFit.cover);
+                                    },
+                                  )
+                                : Image.network(AppConfig.defaultProfilePic, fit: BoxFit.cover)),
+                      ),
+                    ),
                   ),
                   Positioned(
                     bottom: 0,
                     right: 0,
                     child: GestureDetector(
-                      onTap: () => _showImageSourceActionSheet(context),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        print(">>> [UI] Edit Button Tapped");
+                        _showImageSourceActionSheet(context);
+                      },
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
@@ -406,6 +472,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool isVerifying = false;
     bool isOldPasswordCorrect = false;
 
+    String? validatePassword(String password) {
+      if (password.length < 8) return "Password must be at least 8 characters";
+      if (!password.contains(RegExp(r'[a-z]'))) return "Password must contain at least one lowercase letter";
+      if (!password.contains(RegExp(r'[A-Z]'))) return "Password must contain at least one uppercase letter";
+      if (!password.contains(RegExp(r'[0-9]'))) return "Password must contain at least one number";
+      if (!password.contains(RegExp(r'[@$!%*?&]'))) return "Password must contain at least one special character (@, \$, !, %, *, ?, &)";
+      return null;
+    }
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -441,6 +516,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                     ),
                   ),
+                  const SizedBox(height: 5),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("• At least 8 characters", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                        Text("• At least 1 lowercase letter", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                        Text("• At least 1 uppercase letter", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                        Text("• At least 1 number", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                        Text("• At least 1 symbol (@, \$, !, %, *, ?, &)", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: confirmPasswordController,
@@ -472,6 +561,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     
                     setModalState(() {
                       isVerifying = false;
+                      if (!mounted) return;
                       if (result['message'] == 'The password is incorrect') {
                         errorMessage = "The password is incorrect";
                       } else {
@@ -480,11 +570,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }
                     });
                   } else {
+                    String? validationError = validatePassword(newPasswordController.text);
+                    if (validationError != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError), backgroundColor: Colors.red));
+                      return;
+                    }
+
                     if (newPasswordController.text != confirmPasswordController.text) {
                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
                        return;
                     }
                     final result = await _authService.changePassword(oldPasswordController.text, newPasswordController.text);
+                    if (!context.mounted) return;
                     if (result['success']) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Password updated successfully")));
@@ -555,11 +652,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   if (success) {
                     await _loadUserData();
-                    if (mounted) Navigator.pop(context);
+                    if (!context.mounted) return;
+                    Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text("$field updated successfully")),
                     );
                   } else {
+                    if (!context.mounted) return;
                     setModalState(() => isSaving = false);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text("Failed to update $field")),

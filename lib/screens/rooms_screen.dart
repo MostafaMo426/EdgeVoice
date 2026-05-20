@@ -33,9 +33,11 @@ class RoomsScreenState extends State<RoomsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error fetching rooms: ${e.toString()}")),
-        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Error fetching rooms: ${e.toString()}")),
+          );
+        }
       }
     }
   }
@@ -95,24 +97,24 @@ class RoomsScreenState extends State<RoomsScreen> {
                       setDialogState(() => isSubmitting = true);
                       try {
                         final success = await _apiService.addRoom(newRoomName.trim());
+                        if (!mounted) return;
                         if (success) {
                           await fetchRooms();
-                          if (mounted) Navigator.pop(context);
+                          if (context.mounted) Navigator.pop(context);
                         } else {
                           setDialogState(() => isSubmitting = false);
-                          if (mounted) {
+                          if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text("Failed to add room. Please try again.")),
                             );
                           }
                         }
                       } catch (e) {
+                        if (!context.mounted) return;
                         setDialogState(() => isSubmitting = false);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text("Error: ${e.toString()}")),
-                          );
-                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Error: ${e.toString()}")),
+                        );
                       }
                     },
               child: Text(isSubmitting ? "Adding..." : "Add", style: TextStyle(color: accentCyan)),
@@ -125,6 +127,7 @@ class RoomsScreenState extends State<RoomsScreen> {
 
   void _editRoom(int index) {
     String updatedName = _rooms[index]['name'] ?? "";
+    final roomId = _rooms[index]['id'];
     bool isProcessing = false;
 
     showDialog(
@@ -165,14 +168,13 @@ class RoomsScreenState extends State<RoomsScreen> {
                   ? null
                   : () async {
                       setDialogState(() => isProcessing = true);
-                      final roomId = _rooms[index]['id'];
                       final success = await _apiService.deleteRoom(roomId);
                       if (success) {
-                        fetchRooms();
-                        if (mounted) Navigator.pop(context);
+                        await fetchRooms();
+                        if (context.mounted) Navigator.pop(context);
                       } else {
                         setDialogState(() => isProcessing = false);
-                        if (mounted) {
+                        if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text("Failed to delete room.")),
                           );
@@ -191,14 +193,13 @@ class RoomsScreenState extends State<RoomsScreen> {
                   : () async {
                       if (updatedName.trim().isEmpty) return;
                       setDialogState(() => isProcessing = true);
-                      final roomId = _rooms[index]['id'];
                       final success = await _apiService.updateRoom(roomId, updatedName.trim());
                       if (success) {
-                        fetchRooms();
-                        if (mounted) Navigator.pop(context);
+                        await fetchRooms();
+                        if (context.mounted) Navigator.pop(context);
                       } else {
                         setDialogState(() => isProcessing = false);
-                        if (mounted) {
+                        if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text("Failed to update room.")),
                           );
@@ -221,7 +222,7 @@ class RoomsScreenState extends State<RoomsScreen> {
     try {
       roomDevices = await _apiService.getRoomDevices(roomId);
     } catch (e) {
-      print("Error loading room devices: $e");
+      debugPrint("Error loading room devices: $e");
     }
 
     if (!mounted) return;
@@ -329,8 +330,8 @@ class RoomsScreenState extends State<RoomsScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
           backgroundColor: cardColor,
           title: const Text("Add Device", style: TextStyle(color: Colors.white)),
           content: SizedBox(
@@ -348,7 +349,7 @@ class RoomsScreenState extends State<RoomsScreen> {
                     child: ListView.builder(
                       shrinkWrap: true,
                       itemCount: availableDevices.length,
-                      itemBuilder: (context, index) {
+                      itemBuilder: (itemContext, index) {
                         return ListTile(
                           leading: Icon(_getDeviceIcon(availableDevices[index]), color: accentCyan, size: 20),
                           title: Text(availableDevices[index], style: const TextStyle(color: Colors.white)),
@@ -358,18 +359,33 @@ class RoomsScreenState extends State<RoomsScreen> {
                             final deviceName = availableDevices[index];
                             try {
                               final success = await _apiService.addDevice(roomId, deviceName, availableDevices[index]);
+                              
                               if (success) {
+                                // Close dialog immediately using the correct dialogContext
+                                Navigator.of(dialogContext).pop();
+                                
+                                // Refresh devices in the background
                                 final updatedDevices = await _apiService.getRoomDevices(roomId);
+                                
                                 setModalState(() {
                                   currentDevices.clear();
                                   currentDevices.addAll(updatedDevices);
                                 });
-                                if (mounted) Navigator.pop(context);
                               } else {
-                                setDialogState(() => isAdding = false);
+                                if (dialogContext.mounted) {
+                                  setDialogState(() => isAdding = false);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text("Failed to add device")),
+                                  );
+                                }
                               }
                             } catch (e) {
-                              setDialogState(() => isAdding = false);
+                              if (dialogContext.mounted) {
+                                setDialogState(() => isAdding = false);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text("Error: $e")),
+                                );
+                              }
                             }
                           },
                         );
@@ -540,9 +556,9 @@ class _ReorderableGridViewState extends State<ReorderableGridView> {
       ),
       itemBuilder: (context, index) {
         return DragTarget<int>(
-          onWillAccept: (data) => data != index,
-          onAccept: (data) {
-            widget.onReorder(data, index);
+          onWillAcceptWithDetails: (details) => details.data != index,
+          onAcceptWithDetails: (details) {
+            widget.onReorder(details.data, index);
           },
           builder: (context, candidateData, rejectedData) {
             return LongPressDraggable<int>(

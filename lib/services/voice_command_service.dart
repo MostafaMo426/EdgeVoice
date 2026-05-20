@@ -42,8 +42,11 @@ class VoiceCommandService {
 
   Future<void> startRecording() async {
     if (await _recorder.hasPermission()) {
-      final directory = await getApplicationDocumentsDirectory();
-      final path = '${directory.path}/voice_cmd.wav';
+      String? path;
+      if (!kIsWeb) {
+        final directory = await getApplicationDocumentsDirectory();
+        path = '${directory.path}/voice_cmd.wav';
+      }
       
       const config = RecordConfig(
         encoder: AudioEncoder.wav,
@@ -51,7 +54,7 @@ class VoiceCommandService {
         numChannels: 1,
       );
 
-      await _recorder.start(config, path: path);
+      await _recorder.start(config, path: path ?? '');
     }
   }
 
@@ -62,11 +65,17 @@ class VoiceCommandService {
 
   Future<Map<String, dynamic>?> uploadAudio(String path) async {
     try {
-      final file = File(path);
-      final bytes = await file.readAsBytes();
+      Uint8List bytes;
+      if (kIsWeb) {
+        final response = await Dio().get(path, options: Options(responseType: ResponseType.bytes));
+        bytes = Uint8List.fromList(response.data);
+      } else {
+        final file = File(path);
+        bytes = await file.readAsBytes();
+      }
       
       final formData = FormData.fromMap({
-        'audio': MultipartFile.fromBytes(bytes, filename: 'command.wav'),
+        'file': MultipartFile.fromBytes(bytes, filename: 'command.wav'),
       });
 
       // Updated to match Swagger: /api/Audio/upload
@@ -88,9 +97,9 @@ class VoiceCommandService {
       }
     } catch (e) {
       if (e is DioException && e.response != null) {
-        print("Error uploading audio: ${e.response?.statusCode} - ${e.response?.data}");
+        debugPrint("Error uploading audio: ${e.response?.statusCode} - ${e.response?.data}");
       } else {
-        print("Error uploading audio: $e");
+        debugPrint("Error uploading audio: $e");
       }
     }
     return null;

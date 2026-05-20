@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:animations/animations.dart';
 import 'login_screen.dart';
+import 'verify_email_screen.dart';
 import '../widgets/custom_widgets.dart';
 import '../services/auth_service.dart';
 
@@ -33,8 +35,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
     if (email.isEmpty || password.isEmpty || _nameController.text.isEmpty) return "Please fill in all fields";
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
     if (!emailRegex.hasMatch(email)) return "Please enter a valid email address";
-    if (password.length < 6) return "Password must be at least 6 characters";
+    if (password.length < 8) return "Password must be at least 8 characters";
+    if (!password.contains(RegExp(r'[a-z]'))) return "Password must contain at least one lowercase letter";
     if (!password.contains(RegExp(r'[A-Z]'))) return "Password must contain at least one uppercase letter";
+    if (!password.contains(RegExp(r'[0-9]'))) return "Password must contain at least one number";
+    if (!password.contains(RegExp(r'[@$!%*?&]'))) return r"Password must contain at least one special character (@, $, !, %, *, ?, &)";
     if (password != _confirmController.text.trim()) return "Passwords do not match";
     return null;
   }
@@ -54,8 +59,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
     setState(() => _isLoading = false);
     if (errorMessage == null) {
       if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Account Created!"), backgroundColor: Colors.green));
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Account Created! Please verify your email."), backgroundColor: Colors.green));
+        Navigator.pushReplacement(
+          context, 
+          MaterialPageRoute(builder: (context) => VerifyEmailScreen(email: _emailController.text.trim()))
+        );
       }
     } else {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage), backgroundColor: Colors.red));
@@ -118,19 +126,25 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                                 ),
                                 const SizedBox(height: 30),
 
-                                // --- LOGO SIZE INCREASED HERE (120) ---
-                                Image.asset(
-                                  'assets/images/Logo.png',
-                                  height: 150,
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.centerLeft,
+                                // --- LOGO WITH HERO MORPH ---
+                                Hero(
+                                  tag: 'app_logo',
+                                  child: Image.asset(
+                                    'assets/images/Logo.png',
+                                    height: 150,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.centerLeft,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                           Expanded(
                             flex: 6,
-                            child: Image.asset('assets/images/rafiki.png', height: 220, fit: BoxFit.contain, alignment: Alignment.centerRight),
+                            child: Hero(
+                              tag: 'auth_image',
+                              child: Image.asset('assets/images/rafiki.png', height: 220, fit: BoxFit.contain, alignment: Alignment.centerRight),
+                            ),
                           ),
                         ],
                       ),
@@ -174,8 +188,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text("• At least 6 characters", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                                Text("• At least 8 characters", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                                Text("• At least 1 lowercase letter", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
                                 Text("• At least 1 uppercase letter", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                                Text("• At least 1 number", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                                Text("• At least 1 symbol (@, \$, !, %, *, ?, &)", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
                               ],
                             ),
                           ),
@@ -206,23 +223,26 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                           ),
 
                           const SizedBox(height: 20),
-                          const SocialLoginSection(dividerText: "Or sign up with"),
-                          const SizedBox(height: 20),
-
                           Center(
-                            child: GestureDetector(
-                              onTap: () {
-                                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
-                              },
-                              child: RichText(
-                                text: const TextSpan(
-                                  text: "Already have an account? ",
-                                  style: TextStyle(color: Colors.grey, fontSize: 14),
-                                  children: [
-                                    TextSpan(text: "sign in", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
-                                  ],
+                            child: OpenContainer(
+                              closedElevation: 0,
+                              openElevation: 0,
+                              closedColor: Colors.transparent,
+                              openColor: gradientStart,
+                              transitionType: ContainerTransitionType.fade,
+                              closedBuilder: (context, action) => GestureDetector(
+                                onTap: action,
+                                child: RichText(
+                                  text: const TextSpan(
+                                    text: "Already have an account? ",
+                                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                                    children: [
+                                      TextSpan(text: "sign in", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
+                                    ],
+                                  ),
                                 ),
                               ),
+                              openBuilder: (context, action) => const LoginScreen(),
                             ),
                           ),
                           const SizedBox(height: 20),

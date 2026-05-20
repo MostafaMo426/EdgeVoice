@@ -8,13 +8,13 @@ class BypassService {
   BypassService._internal();
 
   // --- MOCK DATABASE ---
-  List<Map<String, dynamic>> _rooms = [
+  final List<Map<String, dynamic>> _rooms = [
     {'id': 1, 'name': 'Living Room', 'userId': 1},
     {'id': 2, 'name': 'Bedroom', 'userId': 1},
     {'id': 3, 'name': 'Kitchen', 'userId': 1},
   ];
 
-  List<Map<String, dynamic>> _devices = [
+  final List<Map<String, dynamic>> _devices = [
     {'id': 1, 'roomId': 1, 'name': 'Lights', 'type': 'Lights', 'status': true},
     {'id': 2, 'roomId': 1, 'name': 'TV', 'type': 'TV', 'status': false},
     {'id': 3, 'roomId': 2, 'name': 'Main Lights', 'type': 'Lights', 'status': true},
@@ -25,11 +25,11 @@ class BypassService {
     {'id': 8, 'roomId': 3, 'name': 'Dryer', 'type': 'Dryer', 'status': false},
   ];
 
-  List<Map<String, dynamic>> _logs = [
+  final List<Map<String, dynamic>> _logs = [
     {'id': 1, 'message': 'System started in Bypass Mode', 'createdAt': '2023-10-01 10:00:00', 'userId': 1},
   ];
 
-  List<Map<String, dynamic>> _commands = [];
+  final List<Map<String, dynamic>> _commands = [];
 
   // --- ROOMS ---
   Future<List<dynamic>> getRooms() async {

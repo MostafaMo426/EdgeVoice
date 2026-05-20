@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../config.dart';
 
 class GeminiService {
@@ -28,7 +29,7 @@ class GeminiService {
         }
       }
     } catch (e) {
-      print("Error calling Gemini: $e");
+      debugPrint("Error calling Gemini: $e");
     }
     return null;
   }

@@ -1,7 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:animations/animations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'settings_screen.dart'; 
 import 'logs_screen.dart'; // Import Logs Screen
@@ -42,9 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   List<dynamic> _rooms = [];
   bool _isLoading = true;
 
-  File? _profileImage; // For locally picked image preview if needed
   String? _profileImageUrl;
-  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -192,112 +189,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Icons.room;
   }
 
-  void _showRoomControls(int roomIndex) async {
-    final roomId = _rooms[roomIndex]['id'];
-    List<dynamic> roomDevices = _rooms[roomIndex]['devices'] ?? [];
-
-    final apiService = Provider.of<ApiService>(context, listen: false);
-    try {
-      final updatedDevices = await apiService.getRoomDevices(roomId);
-      if (mounted) {
-        setState(() {
-          _rooms[roomIndex]['devices'] = updatedDevices;
-          roomDevices = updatedDevices;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error refreshing devices: $e");
-    }
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          final room = _rooms[roomIndex];
-          return Container(
-            height: MediaQuery.of(context).size.height * 0.7,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F1115),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            ),
-            padding: const EdgeInsets.all(25),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(room['name'] ?? "Room",
-                        style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: roomDevices.length,
-                    itemBuilder: (context, index) {
-                      final device = roomDevices[index];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 15),
-                        padding: const EdgeInsets.all(15),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF161E2E),
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(_getDeviceIcon(device['type'] ?? ""), color: accentCyan),
-                                const SizedBox(width: 15),
-                                Text(device['name'] ?? "", style: const TextStyle(color: Colors.white, fontSize: 16)),
-                              ],
-                            ),
-                            Switch(
-                                  value: device['isOn'] ?? device['status'] ?? false,
-                              activeThumbColor: accentCyan,
-                              onChanged: (val) async {
-                                final apiService = Provider.of<ApiService>(context, listen: false);
-                                final success = await apiService.updateDeviceStatus(device['id'], val);
-                                if (success) {
-                                  setModalState(() {
-                                    device['isOn'] = val;
-                                    device['status'] = val;
-                                  });
-                                  if (mounted) {
-                                    setState(() {
-                                      String? legacyKey = _mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "");
-                                      if (legacyKey != null) deviceStates[legacyKey] = val;
-                                    });
-                                  }
-                                  apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");
-                                }
-                              },
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   IconData _getDeviceIcon(String type) {
     switch (type) {
       case "Lights": return Icons.lightbulb_outline;
@@ -364,8 +255,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   int _selectedIndex = 0;
-
-  String _text = "Tap to Speak";
 
   // Colors & Data
   final Color gradientStart = const Color(0xFF1E293B);
@@ -472,73 +361,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final voiceProvider = Provider.of<EdgeVoiceVoiceProvider>(context, listen: false);
 
     if (!voiceProvider.isRecording) {
-      setState(() {
-        _text = "Listening...";
-        _pulseController.repeat(reverse: true);
-      });
       await voiceProvider.startRecording();
     } else {
-      _pulseController.stop();
-      setState(() {
-        _text = "Processing...";
-      });
-      final result = await voiceProvider.stopAndProcess();
-      
-      if (result != null) {
-        final String? action = result['actionTriggered'];
-        final String? transcription = result['transcription'] ?? result['text']; // Try both common keys
-        
-        if (transcription != null && transcription.isNotEmpty) {
-          setState(() => _text = transcription);
-        } else {
-          setState(() => _text = "Command recognized");
-        }
-
-        if (action != null && action != "UNKNOWN") {
-          _handleActionToken(action);
-        }
-      } else {
-        setState(() => _text = "Sorry, I didn't catch that.");
-      }
-
-      // Keep the result visible for longer (5 seconds)
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted && _text != "Listening...") {
-          setState(() => _text = "Tap to Speak");
-        }
-      });
+      await voiceProvider.stopAndProcess();
     }
-  }
-
-  void _handleActionToken(String token) {
-    debugPrint("Handling Action Token: $token");
-    
-    // Example tokens: "LIVING_LIGHTS_ON", "AC_OFF", etc.
-    final parts = token.split('_');
-    if (parts.length < 2) return;
-
-    final stateStr = parts.last.toUpperCase();
-    bool? targetState;
-    if (stateStr == "ON") targetState = true;
-    if (stateStr == "OFF") targetState = false;
-
-    if (targetState == null) return;
-
-    // Map token to legacy keys
-    if (token.contains("LIVING_LIGHTS")) _updateDevice('living_lights', targetState);
-    if (token.contains("LIVING_TV")) _updateDevice('living_tv', targetState);
-    if (token.contains("BED_LIGHTS")) _updateDevice('bed_lights', targetState);
-    if (token.contains("BED_FAN")) _updateDevice('bed_fan', targetState);
-    if (token.contains("KITCHEN_LIGHTS")) _updateDevice('kitchen_lights', targetState);
-    if (token.contains("COFFEE")) _updateDevice('kitchen_coffee', targetState);
-    if (token.contains("FRIDGE")) _updateDevice('kitchen_fridge', targetState);
-    if (token.contains("VACUUM")) _updateDevice('vacuum', targetState);
-    if (token.contains("WASHER")) _updateDevice('washing_machine', targetState);
-    if (token.contains("DRYER")) _updateDevice('dryer', targetState);
-    if (token.contains("AIR_FRYER")) _updateDevice('air_fryer', targetState);
-    if (token.contains("HUMIDIFIER")) _updateDevice('humidifier', targetState);
-    if (token.contains("FRONT_DOOR")) _updateDevice('front_door', targetState);
-    if (token.contains("AC")) _updateDevice('ac_unit', targetState);
   }
 
   // --- NAVIGATION LOGIC ---
@@ -665,7 +491,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                       },
                                     );
                                   }),
-                                  onTap: () => _showRoomControls(entry.key),
                                 ),
                               );
                             }).toList(),
@@ -765,6 +590,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         final isListening = voiceProvider.isRecording;
         final isProcessing = voiceProvider.isWaitingForServer;
         final isSpeaking = voiceProvider.isSpeaking;
+        
+        // Update pulse animation based on state
+        if (isListening || isSpeaking) {
+          if (!_pulseController.isAnimating) _pulseController.repeat(reverse: true);
+        } else {
+          _pulseController.stop();
+        }
+
+        // Determine displayed text
+        String displayText = "Tap to Speak";
+        if (isListening) {
+          displayText = voiceProvider.realtimeText;
+        } else if (isProcessing) {
+          displayText = "Processing...";
+        } else if (voiceProvider.lastAiResponse != null) {
+          displayText = voiceProvider.lastAiResponse!;
+        } else if (voiceProvider.lastTranscription != null) {
+          displayText = voiceProvider.lastTranscription!;
+        }
 
         return GestureDetector(
           onTap: _listen,
@@ -810,14 +654,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
                 const SizedBox(height: 20),
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 300),
-                  style: TextStyle(
-                    color: isListening ? accentCyan : Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 300),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: isListening ? accentCyan : Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold
+                    ),
+                    child: Text(displayText),
                   ),
-                  child: Text(isProcessing ? "Processing..." : _text, textAlign: TextAlign.center),
                 ),
                 const SizedBox(height: 5),
                 if(!isListening && !isProcessing && !isSpeaking)
@@ -860,9 +708,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     // Helper to format the image URL
     String? fullImageUrl;
     if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
-      fullImageUrl = _profileImageUrl!.startsWith('http') 
-          ? _profileImageUrl 
-          : "${AppConfig.apiBaseUrl.replaceAll('/api/', '')}/$_profileImageUrl";
+      String path = _profileImageUrl!.replaceAll('\\', '/');
+      if (path.startsWith('http')) {
+        fullImageUrl = path;
+      } else {
+        String baseUrl = AppConfig.apiBaseUrl.split('/api/')[0];
+        if (!path.startsWith('/')) path = "/$path";
+        fullImageUrl = "$baseUrl$path";
+      }
     }
 
     return Row(
@@ -889,59 +742,172 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           onTap: () {
             setState(() => _selectedIndex = 3); // Switch to Settings tab
           },
-          child: CircleAvatar(
-            radius: 20,
-            backgroundColor: accentCyan.withValues(alpha: 0.1),
-            backgroundImage: fullImageUrl != null
-                ? NetworkImage(fullImageUrl)
-                : const AssetImage('assets/images/rafiki.png') as ImageProvider,
+          child: Hero(
+            tag: 'profile_pic',
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accentCyan.withValues(alpha: 0.1),
+              ),
+              child: ClipOval(
+                child: (fullImageUrl != null
+                    ? Image.network(
+                        fullImageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Image.network(AppConfig.defaultProfilePic, fit: BoxFit.cover),
+                      )
+                    : Image.network(AppConfig.defaultProfilePic, fit: BoxFit.cover)),
+              ),
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildRoomCard(String name, String status, IconData icon, Iterable<Widget> toggles, {VoidCallback? onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF161E2E),
-          borderRadius: BorderRadius.circular(25),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: const Color(0xFF263345), borderRadius: BorderRadius.circular(12)),
-                  child: Icon(icon, color: accentCyan, size: 24),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                      Text(status, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-                    ],
+  Widget _buildRoomCard(String name, String status, IconData icon, Iterable<Widget> toggles) {
+    return OpenContainer(
+      closedElevation: 0,
+      openElevation: 0,
+      closedColor: Colors.transparent,
+      openColor: const Color(0xFF0F1115),
+      transitionType: ContainerTransitionType.fade,
+      closedBuilder: (context, action) => GestureDetector(
+        onTap: action,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF161E2E),
+            borderRadius: BorderRadius.circular(25),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFF263345), borderRadius: BorderRadius.circular(12)),
+                    child: Icon(icon, color: accentCyan, size: 24),
                   ),
-                ),
-                Icon(Icons.arrow_forward_ios, color: accentCyan, size: 16)
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: toggles.toList(),
-            )
-          ],
+                  const SizedBox(width: 15),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(status, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_ios, color: accentCyan, size: 16)
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: toggles.toList(),
+              )
+            ],
+          ),
         ),
       ),
+      openBuilder: (context, action) => _buildRoomDetailsView(name, icon),
+    );
+  }
+
+  // New detailed room view for morphing
+  Widget _buildRoomDetailsView(String roomName, IconData roomIcon) {
+    // Find the room index for state management
+    int roomIndex = _rooms.indexWhere((r) => r['name'] == roomName);
+    if (roomIndex == -1) return const Scaffold(body: Center(child: Text("Room not found")));
+    
+    final room = _rooms[roomIndex];
+    List<dynamic> roomDevices = room['devices'] ?? [];
+
+    return StatefulBuilder(
+      builder: (context, setInternalState) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF0F1115),
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: Text(roomName, style: const TextStyle(color: Colors.white)),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          body: Padding(
+            padding: const EdgeInsets.all(25),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(roomIcon, color: accentCyan, size: 32),
+                    const SizedBox(width: 15),
+                    const Text("Active Devices", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                  ],
+                ),
+                const SizedBox(height: 30),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: roomDevices.length,
+                    itemBuilder: (context, index) {
+                      final device = roomDevices[index];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 15),
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161E2E),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(_getDeviceIcon(device['type'] ?? ""), color: accentCyan),
+                                const SizedBox(width: 15),
+                                Text(device['name'] ?? "", style: const TextStyle(color: Colors.white, fontSize: 16)),
+                              ],
+                            ),
+                            Switch(
+                              value: device['isOn'] ?? device['status'] ?? false,
+                              activeThumbColor: accentCyan,
+                              onChanged: (val) async {
+                                final apiService = Provider.of<ApiService>(context, listen: false);
+                                final success = await apiService.updateDeviceStatus(device['id'], val);
+                                if (success) {
+                                  // Update both internal state (for immediate UI) 
+                                  // and parent state (for consistency)
+                                  setInternalState(() {
+                                    device['isOn'] = val;
+                                    device['status'] = val;
+                                  });
+                                  setState(() {
+                                    String? legacyKey = _mapDeviceToLegacyKey(roomName, device['name'] ?? "");
+                                    if (legacyKey != null) deviceStates[legacyKey] = val;
+                                  });
+                                  apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
     );
   }
 }

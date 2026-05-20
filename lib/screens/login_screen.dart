@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:animations/animations.dart';
 import 'create_account_screen.dart';
 import 'home_screen.dart';
 import '../widgets/custom_widgets.dart';
@@ -38,6 +39,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
     if (errorMessage == null) {
       if(mounted) {
+        // Fetch full profile to ensure we have the imagePath from the database
+        await _authService.getUserProfile();
+
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Login Successful!"), backgroundColor: Colors.green));
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
       }
@@ -97,19 +101,25 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 const SizedBox(height: 30),
 
-                                // --- LOGO SIZE INCREASED HERE (120) ---
-                                Image.asset(
-                                  'assets/images/Logo.png',
-                                  height: 150,
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.centerLeft,
+                                // --- LOGO WITH HERO MORPH ---
+                                Hero(
+                                  tag: 'app_logo',
+                                  child: Image.asset(
+                                    'assets/images/Logo.png',
+                                    height: 150,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.centerLeft,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                           Expanded(
                             flex: 6,
-                            child: Image.asset('assets/images/rafiki2.png', height: 220, fit: BoxFit.contain, alignment: Alignment.centerRight),
+                            child: Hero(
+                              tag: 'auth_image',
+                              child: Image.asset('assets/images/rafiki2.png', height: 220, fit: BoxFit.contain, alignment: Alignment.centerRight),
+                            ),
                           ),
                         ],
                       ),
@@ -181,23 +191,26 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
 
                           const SizedBox(height: 20),
-                          const SocialLoginSection(dividerText: "Or sign up with"),
-                          const SizedBox(height: 20),
-
                           Center(
-                            child: GestureDetector(
-                              onTap: () {
-                                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const CreateAccountScreen()));
-                              },
-                              child: RichText(
-                                text: const TextSpan(
-                                  text: "Don't have an account? ",
-                                  style: TextStyle(color: Colors.grey, fontSize: 14),
-                                  children: [
-                                    TextSpan(text: "sign up", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
-                                  ],
+                            child: OpenContainer(
+                              closedElevation: 0,
+                              openElevation: 0,
+                              closedColor: Colors.transparent,
+                              openColor: gradientStart,
+                              transitionType: ContainerTransitionType.fade,
+                              closedBuilder: (context, action) => GestureDetector(
+                                onTap: action,
+                                child: RichText(
+                                  text: const TextSpan(
+                                    text: "Don't have an account? ",
+                                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                                    children: [
+                                      TextSpan(text: "sign up", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
+                                    ],
+                                  ),
                                 ),
                               ),
+                              openBuilder: (context, action) => const CreateAccountScreen(),
                             ),
                           ),
                           const SizedBox(height: 20),
