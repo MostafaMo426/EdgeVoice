@@ -3,20 +3,17 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../services/audio_feedback_service.dart';
 import '../services/api_service.dart';
-import '../services/gemini_service.dart';
 
 class EdgeVoiceVoiceProvider extends ChangeNotifier {
   // Use dynamic to prevent type-check crashes during hot reload if library isn't linked
   dynamic _speech; 
   final AudioFeedbackService _audioFeedbackService = AudioFeedbackService();
   final ApiService _apiService = ApiService();
-  final GeminiService _geminiService = GeminiService();
 
   bool _isRecording = false;
   bool _isWaitingForServer = false;
   bool _isSpeaking = false;
   String? _lastTranscription;
-  String? _lastAiResponse;
   String _realtimeText = "";
 
   // Helper to safely get the speech instance
@@ -34,7 +31,6 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   bool get isWaitingForServer => _isWaitingForServer;
   bool get isSpeaking => _isSpeaking;
   String? get lastTranscription => _lastTranscription;
-  String? get lastAiResponse => _lastAiResponse;
   String get realtimeText => _realtimeText;
 
   Future<void> startRecording() async {
@@ -45,6 +41,12 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
       return;
     }
 
+    // Reset everything before a new recording
+    _lastTranscription = null;
+    _realtimeText = "";
+    _isWaitingForServer = false;
+    _isSpeaking = false;
+    
     try {
       if (speech.isListening) return;
 
@@ -67,7 +69,6 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
       if (available) {
         _isRecording = true;
         _lastTranscription = null;
-        _lastAiResponse = null;
         _realtimeText = "Listening...";
         notifyListeners();
 
@@ -83,12 +84,12 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
           pauseFor: const Duration(seconds: 2), 
         );
       } else {
-        _realtimeText = "Speech not available on this browser";
+        _realtimeText = "Speech not available on this device";
         notifyListeners();
       }
     } catch (e) {
       debugPrint("Error starting speech: $e");
-      _realtimeText = "Microphone error. Check permissions or HTTPS.";
+      _realtimeText = "Microphone error. Check permissions.";
       _isRecording = false;
       notifyListeners();
     }
@@ -100,44 +101,43 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     final speech = _speech as stt.SpeechToText;
     await speech.stop();
     _isRecording = false;
-    _isWaitingForServer = true;
-    _realtimeText = "Processing...";
+    
+    // Capture the text we have so far
+    String capturedText = (_lastTranscription ?? _realtimeText).trim();
+    if (capturedText == "Processing..." || capturedText == "Listening...") capturedText = "";
+    
+    // IMMEDIATELY WIPE ALL STATE
+    // This ensures the UI reverts to "Touch to Speak" if nothing else happens
+    _lastTranscription = null;
+    _realtimeText = "";
+    _isWaitingForServer = false;
+    _isSpeaking = false;
     notifyListeners();
 
-    String? text = _lastTranscription ?? _realtimeText;
-    if (text == "Processing..." || text == "Listening...") text = "";
-    
-    if (text.isNotEmpty) {
-      debugPrint("Processing text: $text");
-      await _apiService.executeVoiceCommand(text);
-      String? aiReply = await _geminiService.getAiResponse(text);
-      
-      _lastAiResponse = aiReply;
-      _isWaitingForServer = false;
+    if (capturedText.isNotEmpty) {
+      // Start processing phase
+      _isWaitingForServer = true;
       notifyListeners();
 
-      if (aiReply != null && aiReply.isNotEmpty) {
-        _isSpeaking = true;
-        notifyListeners();
-        try {
-          await _audioFeedbackService.streamSiriResponse(aiReply);
-        } catch (e) {
-          debugPrint("TTS Error: $e");
-        }
+      debugPrint("Processing text: $capturedText");
+      
+      try {
+        // Execute the command via API (Local TinyML logic handled by hardware)
+        await _apiService.executeVoiceCommand(capturedText);
+        
+        // Short delay to show "Processing" state to user
+        await Future.delayed(const Duration(milliseconds: 1500));
+        
+      } catch (e) {
+        debugPrint("Voice Processing Error: $e");
+      } finally {
+        // FINAL RESET: Force back to "Touch to Speak" regardless of success/fail
+        _isWaitingForServer = false;
         _isSpeaking = false;
+        _lastTranscription = null;
+        _realtimeText = "";
         notifyListeners();
       }
-    } else {
-      _isWaitingForServer = false;
-      _realtimeText = "No command detected";
-      notifyListeners();
-      
-      Future.delayed(const Duration(seconds: 2), () {
-        if (!_isRecording && !_isWaitingForServer) {
-          _realtimeText = "";
-          notifyListeners();
-        }
-      });
     }
   }
 

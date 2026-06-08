@@ -436,4 +436,34 @@ class ApiService {
     }
     return [];
   }
+
+  // --- AUDIO API ---
+
+  Future<bool> uploadAudio(File audioFile) async {
+    try {
+      String fileName = audioFile.path.split('/').last;
+      FormData formData = FormData.fromMap({
+        "file": await MultipartFile.fromFile(audioFile.path, filename: fileName),
+      });
+
+      final response = await _dio.post('Audio/upload', data: formData);
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint("Error uploading audio: $e");
+      return false;
+    }
+  }
+
+  Future<bool> controlAudio(String keyword, String source) async {
+    try {
+      final response = await _dio.put('Audio/control', data: {
+        'keyword': keyword,
+        'source': source,
+      });
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint("Error controlling audio: $e");
+      return false;
+    }
+  }
 }

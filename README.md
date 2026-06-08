@@ -1,43 +1,42 @@
 # EdgeVoice 🎙️
 
-**EdgeVoice** is a modern, AI-powered voice assistant and Smart Home controller built using Flutter. The app features a futuristic "Cyberpunk/Dark Mode" aesthetic, utilizing custom gradients, vector assets, and a secure authentication flow to provide a premium user experience.
+**EdgeVoice** is a high-end Smart Home controller and voice assistant bridge built with Flutter. It features a sleek "Cyberpunk/Dark Mode" aesthetic, leveraging local TinyML on hardware and a robust .NET backend for a premium user experience.
 
 ---
 
 ## 🚀 Key Features
 
-### 🏠 Smart Home Control
-* **Persistent Navigation:** Uses `IndexedStack` to maintain state across Home, Rooms, Logs, and Settings tabs.
-* **Dynamic Room Management:** 
-    * Add, edit, and delete rooms.
-    * Square grid layout for better space utilization.
-    * **Drag-and-Drop Reordering:** Long-press to rearrange rooms in your preferred order.
-* **Device Management:** Add or remove devices (Lights, TV, AC, etc.) within specific rooms.
-* **Remote Sync:** 10-second polling checks an external API for pending commands and updates local UI states automatically.
+### 🎙️ TinyML Voice Integration
+*   **Speech-to-Text (STT):** High-accuracy real-time voice recognition for cloud fallback.
+*   **Hardware First:** Optimized to work with local TinyML models running on the **Arduino Nano 33 BLE Sense Rev2**.
+*   **Auto-Silence Detection:** The assistant intelligently stops listening after 2 seconds of silence.
+*   **Real-time Visual Feedback:** Pulse animations and live transcriptions that react to your voice.
 
-### 🎙️ Voice Assistant (AI Integrated)
-* **Speech-to-Text (STT):** High-accuracy voice recognition for hands-free control.
-* **Smart Command Matching:** Processes natural language to toggle specific devices (e.g., "Turn on living room lights").
-* **Automated Listening:** Automatically stops listening after detecting silence for 2 seconds.
+### 🏠 Smart Home Ecosystem
+*   **Dynamic Room Control:** Manage devices across different rooms (Living Room, Bedroom, Kitchen, etc.) with a modernized grid layout.
+*   **Remote Sync & Polling:** Automatically synchronizes device states with the backend every 10 seconds to ensure the UI reflects external changes.
+*   **Appliance Monitoring:** Real-time status for critical appliances like fridges, AC units, and washing machines.
 
-### 📊 Logs & Monitoring
-* **Real-time Logs:** Tracks user actions and remote commands in a dedicated Logs tab.
-* **API Integration:** Connects to a custom REST API for persistent command history and logging.
+### 🎭 Premium UI/UX
+*   **Morph Transitions:** Utilizes the `animations` package (Container Transform) for smooth, high-fidelity transitions between screens and cards.
+*   **Hero Animations:** Shared element transitions for the App Logo and Profile Picture across Auth and Home screens.
+*   **Cyberpunk Aesthetic:** A consistent dark theme using Neon Cyan accents (`0xFF00F0FF`) and deep slate gradients.
 
-### 🔐 Authentication & Security
-* **Firebase Auth:** Secure login and registration with persistent sessions (auto-login on restart).
-* **Validation:** Robust form validation for email formats and password strength.
-* **Cyberpunk UI:** Consistent dark theme using Cyan accents (`0xFF00F0FF`) and high-end gradients.
+### 👤 Profile & Security
+*   **Custom Auth Flow:** Secure Login, Sign Up, and Email Verification powered by a dedicated .NET REST API.
+*   **Profile Image Uploads:** Full support for uploading and persisting profile pictures using multipart API requests and `XFile`.
+*   **JWT Authentication:** Secure token-based sessions with persistent auto-login capabilities.
 
 ---
 
 ## 🛠️ Tech Stack
 
-* **Framework:** [Flutter](https://flutter.dev/) (Dart)
-* **Backend:** Firebase (Auth & Core)
-* **REST API:** custom .NET API for IoT command handling.
-* **State Management:** `Provider` & `StatefulWidget`
-* **Local Services:** `SpeechToText`, `PermissionHandler`, `Http`
+*   **Framework:** [Flutter](https://flutter.dev/) (Dart)
+*   **Hardware Platform:** Arduino Nano 33 BLE Sense Rev2 (TinyML)
+*   **Backend:** Custom .NET REST API (Hosted on Smarter ASP)
+*   **Networking:** `Dio` for robust API communication and multipart uploads.
+*   **State Management:** `Provider` for clean reactive updates.
+*   **Animations:** `animations` (Google), `TweenAnimationBuilder`.
 
 ---
 
@@ -46,19 +45,20 @@
 ```text
 lib/
 ├── screens/
-│   ├── welcome_screen.dart     # Landing/Splash page
-│   ├── login_screen.dart       # User Sign-in
-│   ├── create_account_screen.dart # User Registration
-│   ├── home_screen.dart        # Master Dashboard (IndexedStack)
-│   ├── rooms_screen.dart       # Grid-based Room & Device Management
-│   ├── logs_screen.dart        # History of commands and actions
-│   └── settings_screen.dart    # Profile & App configuration
+│   ├── welcome_screen.dart     # Landing page with Hero logo
+│   ├── login_screen.dart       # Morphing Auth UI
+│   ├── create_account_screen.dart # Form-validated registration
+│   ├── home_screen.dart        # Master Dashboard with Voice UI
+│   ├── rooms_screen.dart       # Room-specific device toggles
+│   ├── logs_screen.dart        # Real-time command/action history
+│   └── settings_screen.dart    # Profile management & Device pairing
 ├── services/
-│   ├── auth_service.dart       # Firebase Authentication
-│   └── api_service.dart        # REST API for Commands & Logs
-├── widgets/
-│   └── custom_widgets.dart     # Reusable UI components
-└── main.dart                   # App entry point & Auth stream
+│   ├── auth_service.dart       # JWT Auth & Profile image logic
+│   └── api_service.dart        # Smart Home API communication
+├── providers/
+│   ├── edgevoice_voice_provider.dart # Voice logic handler
+│   └── device_pairing_provider.dart  # Hardware linking state
+└── main.dart                   # Multi-provider initialization
 ```
 
 ---
@@ -73,9 +73,8 @@ lib/
     ```bash
     flutter pub get
     ```
-3.  **Firebase Setup:**
-    * Run `flutterfire configure` to set up your project.
-    * The app uses `DefaultFirebaseOptions` for multi-platform support (Web, Android, iOS).
+3.  **API Configuration:**
+    Ensure `lib/config.dart` has the correct `apiBaseUrl`.
 4.  **Run the app:**
     ```bash
     flutter run
@@ -83,42 +82,31 @@ lib/
 
 ---
 
-## 📸 Screenshots
-
-| Dashboard | Rooms Grid | Voice Control |
-|:---:|:---:|:---:|
-| ![Home](assets/images/Logo.jpg) | *(Add screenshot)* | *(Add screenshot)* |
-
----
-
 ## 🗺️ Progress Roadmap
 
 ### ✅ Phase 1: Foundation & Security (Completed)
-- [x] High-fidelity Cyberpunk UI.
-- [x] Firebase Auth Integration (Sign Up/Login).
-- [x] Persistent "User Session" (Auto-login).
-- [x] Bottom Navigation with `IndexedStack`.
+- [x] Custom .NET API Integration (Replacing Firebase).
+- [x] JWT Token Persistence & Secure Storage.
+- [x] Email Verification & Password Change flows.
 
-### ✅ Phase 2: Smart Home & API (Completed)
-- [x] **Rooms System:** Square grid with Drag-to-Reorder logic.
-- [x] **REST API Integration:** Command polling and Log submission.
-- [x] **Device CRUD:** Full management of devices inside rooms.
+### ✅ Phase 2: Smart Home & UI (Completed)
+- [x] **Morphing UI:** Container transforms for room cards.
+- [x] **Profile System:** Multi-platform image upload & persistence.
+- [x] **Dynamic Polling:** Real-time state syncing with the server.
 
-### 🗣️ Phase 3: Voice Core (Completed)
-- [x] **Speech-to-Text:** Live voice recognition.
-- [x] **Logic Engine:** Pattern matching for voice commands.
-- [x] **Auto-Silence Detection:** 2-second timeout for better UX.
+### ✅ Phase 3: Voice Core (Completed)
+- [x] **Speech-to-Text:** Live transcription with visual feedback.
+- [x] **TinyML Bridge:** Communication logic for Arduino hardware.
+- [x] **Auto-Stop Logic:** Silence detection for hands-free usage.
 
-### 🧠 Phase 4: Future Improvements
-- [ ] **Text-to-Speech (TTS):** Give the assistant a voice to reply.
-- [ ] **LLM Integration:** Connect to OpenAI/Gemini for smarter conversations.
-- [ ] **Real-time WebSockets:** Replace 10s polling with instant updates.
+### 🚧 Phase 4: Final Milestone (Pending)
+- [ ] **Physical Device Linking:** Establishing the secure handshake and control link between the Flutter app and the actual **EdgeVoice Hardware Device**.
 
 ---
 
 ## 👨‍💻 Contributors
 
-* **Mostafa Mohamed** - *Lead Developer*
+*   **Mostafa Mohamed** - *Lead Developer*
 
 ## 📄 License
 

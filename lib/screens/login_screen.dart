@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:animations/animations.dart';
 import 'create_account_screen.dart';
+import 'forgot_password_screen.dart';
 import 'home_screen.dart';
 import '../widgets/custom_widgets.dart';
 import '../services/auth_service.dart';
@@ -170,7 +171,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ],
                               ),
                               TextButton(
-                                onPressed: (){},
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
+                                  );
+                                },
                                 child: const Text("Forget password?", style: TextStyle(color: Colors.white)),
                               )
                             ],

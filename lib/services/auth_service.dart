@@ -339,6 +339,44 @@ class AuthService {
     return false;
   }
 
+  // 7. Forgot Password
+  Future<String?> forgotPassword(String email) async {
+    try {
+      final response = await _dio.post('Auth/forgot-password', data: {
+        'email': email,
+      });
+
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return null;
+      }
+      return "Failed to send reset code";
+    } on DioException catch (e) {
+      return e.response?.data?.toString() ?? e.message;
+    }
+  }
+
+  // 8. Reset Password
+  Future<String?> resetPassword({
+    required String email,
+    required String token,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _dio.post('Auth/reset-password', data: {
+        'email': email,
+        'token': token,
+        'newPassword': newPassword,
+      });
+
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return null;
+      }
+      return "Failed to reset password";
+    } on DioException catch (e) {
+      return e.response?.data?.toString() ?? e.message;
+    }
+  }
+
   Future<void> bypassLogin() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', true);

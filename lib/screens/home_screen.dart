@@ -210,36 +210,92 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   // --- GROUP TOGGLES ---
-  void _toggleLights() {
-    bool anyOn = deviceStates['living_lights']! || deviceStates['bed_lights']! || deviceStates['kitchen_lights']!;
+  void _toggleLights() async {
+    // 1. Determine target state (if any light is on, turn all off)
+    bool anyOn = false;
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      if (devices.any((d) => (d['type'] == 'Lights' || (d['name']?.toString().toLowerCase().contains('light') ?? false)) && (d['isOn'] ?? d['status'] ?? false))) {
+        anyOn = true;
+        break;
+      }
+    }
     bool target = !anyOn;
-    _updateDevice('living_lights', target, silent: true);
-    _updateDevice('bed_lights', target, silent: true);
-    _updateDevice('kitchen_lights', target, silent: true);
+
+    // 2. Update all light devices across all rooms
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      for (var device in devices) {
+        if (device['type'] == 'Lights' || (device['name']?.toString().toLowerCase().contains('light') ?? false)) {
+          await _updateDeviceDynamic(device, target);
+        }
+      }
+    }
     _showBulkFeedback("Lights", target);
   }
 
-  void _toggleDoors() {
-    bool target = !deviceStates['front_door']!;
-    _updateDevice('front_door', target);
+  void _toggleDoors() async {
+    bool anyOpen = false;
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      if (devices.any((d) => (d['type'] == 'Door' || (d['name']?.toString().toLowerCase().contains('door') ?? false)) && (d['isOn'] ?? d['status'] ?? false))) {
+        anyOpen = true;
+        break;
+      }
+    }
+    bool target = !anyOpen;
+
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      for (var device in devices) {
+        if (device['type'] == 'Door' || (device['name']?.toString().toLowerCase().contains('door') ?? false)) {
+          await _updateDeviceDynamic(device, target);
+        }
+      }
+    }
+    _showBulkFeedback("Doors", target);
   }
 
-  void _toggleClimate() {
-    bool anyOn = deviceStates['bed_fan']! || deviceStates['humidifier']! || deviceStates['ac_unit']!;
+  void _toggleClimate() async {
+    List<String> climateTypes = ['AC', 'Fan', 'Humidifier'];
+    bool anyOn = false;
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      if (devices.any((d) => (climateTypes.contains(d['type']) || (d['name']?.toString().toLowerCase().contains('ac') ?? false)) && (d['isOn'] ?? d['status'] ?? false))) {
+        anyOn = true;
+        break;
+      }
+    }
     bool target = !anyOn;
-    _updateDevice('bed_fan', target, silent: true);
-    _updateDevice('humidifier', target, silent: true);
-    _updateDevice('ac_unit', target, silent: true);
+
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      for (var device in devices) {
+        if (climateTypes.contains(device['type']) || (device['name']?.toString().toLowerCase().contains('ac') ?? false)) {
+          await _updateDeviceDynamic(device, target);
+        }
+      }
+    }
     _showBulkFeedback("Climate", target);
   }
 
-  void _toggleSecurity() {
-    // If anything is on, turn EVERYTHING off. Else turn everything on.
-    bool anyOn = deviceStates.values.any((val) => val == true);
+  void _toggleSecurity() async {
+    // Security toggle: If anything is on, turn everything off.
+    bool anyOn = false;
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      if (devices.any((d) => (d['isOn'] ?? d['status'] ?? false))) {
+        anyOn = true;
+        break;
+      }
+    }
     bool target = !anyOn;
     
-    for (var key in deviceStates.keys) {
-      _updateDevice(key, target, silent: true);
+    for (var room in _rooms) {
+      final devices = room['devices'] as List? ?? [];
+      for (var device in devices) {
+        await _updateDeviceDynamic(device, target);
+      }
     }
     
     _showBulkFeedback("All Systems", target);
@@ -326,33 +382,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           for (var cmd in pending) {
             String action = cmd['action'] ?? "";
             bool state = action.toUpperCase().contains("ON");
-            _showNotification(action, state);
+            
+            // SILENCED: No longer showing SnackBar notification
+            // _showNotification(action, state);
+            
+            // Sync local state if it matches a legacy key
+            if (deviceStates.containsKey(action)) {
+              setState(() => deviceStates[action] = state);
+            }
+            
             await apiService.markCommandAsExecuted(cmd['id']);
           }
         }
       } catch (e) {
         debugPrint("Polling error: $e");
       }
-    }
-  }
-
-  void _showNotification(String name, bool state) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(
-        children: [
-          const Icon(Icons.notifications_active, color: Colors.white),
-          const SizedBox(width: 10),
-          Text("Remote Command: $name is now ${state ? 'ON' : 'OFF'}"),
-        ],
-      ),
-      backgroundColor: Colors.purple,
-      behavior: SnackBarBehavior.floating,
-    ));
-    
-    // Update local UI state
-    if (deviceStates.containsKey(name)) {
-      setState(() => deviceStates[name] = state);
     }
   }
 
@@ -599,15 +643,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         }
 
         // Determine displayed text
-        String displayText = "Tap to Speak";
+        String mainText = "Touch to Speak";
+        String? subText = "Press the button to start";
+
         if (isListening) {
-          displayText = voiceProvider.realtimeText;
+          mainText = voiceProvider.realtimeText.isEmpty ? "Listening..." : voiceProvider.realtimeText;
+          subText = "Recording your voice...";
         } else if (isProcessing) {
-          displayText = "Processing...";
-        } else if (voiceProvider.lastAiResponse != null) {
-          displayText = voiceProvider.lastAiResponse!;
+          mainText = "Processing...";
+          subText = "Executing command...";
         } else if (voiceProvider.lastTranscription != null) {
-          displayText = voiceProvider.lastTranscription!;
+          mainText = voiceProvider.lastTranscription!;
+          subText = "Command detected";
         }
 
         return GestureDetector(
@@ -618,10 +665,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             decoration: BoxDecoration(
                 color: const Color(0xFF161E2E),
                 borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: isListening ? accentCyan : (isProcessing ? Colors.orangeAccent : accentCyan.withValues(alpha: 0.1))),
+                border: Border.all(color: isListening ? accentCyan : (isProcessing ? Colors.yellowAccent : (voiceProvider.isSpeaking ? Colors.greenAccent : accentCyan.withValues(alpha: 0.1)))),
                 boxShadow: [
                   BoxShadow(
-                      color: isListening ? accentCyan.withValues(alpha: 0.2) : accentCyan.withValues(alpha: 0.05),
+                      color: isListening ? accentCyan.withValues(alpha: 0.2) : (isProcessing ? Colors.yellowAccent.withValues(alpha: 0.2) : accentCyan.withValues(alpha: 0.05)),
                       blurRadius: 30,
                       offset: const Offset(0, 10)
                   ),
@@ -630,19 +677,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             child: Column(
               children: [
                 ScaleTransition(
-                  scale: (isListening || isSpeaking) ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
+                  scale: (isListening || isSpeaking || isProcessing) ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
                     height: 80,
                     width: 80,
                     decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: isListening ? Colors.redAccent : (isProcessing ? Colors.orangeAccent : (isSpeaking ? Colors.greenAccent : accentCyan)),
+                        color: isListening ? Colors.redAccent : (isProcessing ? Colors.yellowAccent : (isSpeaking ? Colors.greenAccent : accentCyan)),
                         boxShadow: [
                           BoxShadow(
-                            color: isListening ? Colors.redAccent.withValues(alpha: 0.6) : accentCyan.withValues(alpha: 0.6),
-                            blurRadius: (isListening || isSpeaking) ? 50 : 40,
-                            spreadRadius: (isListening || isSpeaking) ? 10 : 5
+                            color: isListening ? Colors.redAccent.withValues(alpha: 0.6) : (isProcessing ? Colors.yellowAccent.withValues(alpha: 0.6) : accentCyan.withValues(alpha: 0.6)),
+                            blurRadius: (isListening || isSpeaking || isProcessing) ? 50 : 40,
+                            spreadRadius: (isListening || isSpeaking || isProcessing) ? 10 : 5
                           ),
                         ]
                     ),
@@ -660,16 +707,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     duration: const Duration(milliseconds: 300),
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: isListening ? accentCyan : Colors.white,
+                      color: (isListening || isSpeaking) ? accentCyan : Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.bold
                     ),
-                    child: Text(displayText),
+                    child: Text(mainText),
                   ),
                 ),
-                const SizedBox(height: 5),
-                if(!isListening && !isProcessing && !isSpeaking)
-                  Text('Tap to record your command', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                if (subText != null) ...[
+                  const SizedBox(height: 5),
+                  Text(subText, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                ],
               ],
             ),
           ),
