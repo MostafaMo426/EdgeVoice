@@ -24,7 +24,8 @@ class _LoginScreenState extends State<LoginScreen> {
   // Colors
   final Color gradientStart = const Color(0xFF1E293B);
   final Color gradientEnd = const Color(0xFF5270A1);
-  final Color sheetColor = const Color(0xFF0F1115);
+  final Color sheetColor = const Color(0xFFECF1F9); // Light Background
+  final Color darkBlue = const Color(0xFF1E293B);
   final Color accentCyan = const Color(0xFF00F0FF);
 
   void _handleSignIn() async {
@@ -134,17 +135,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       decoration: BoxDecoration(
                           color: sheetColor,
                           borderRadius: const BorderRadius.only(topLeft: Radius.circular(40), topRight: Radius.circular(40)),
-                          border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.1)))
+                          border: Border(top: BorderSide(color: darkBlue.withValues(alpha: 0.1)))
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Center(
-                            child: Text("Login", style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600, color: Colors.white)),
+                          Center(
+                            child: Text("Login", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: darkBlue)),
                           ),
                           const SizedBox(height: 30),
 
-                          buildTextField(label: "Email", hint: "example@gmail.com", controller: _emailController),
+                          buildTextField(label: "Email", hint: "example@gmail.com", controller: _emailController, isDark: false),
                           const SizedBox(height: 20),
                           buildTextField(
                               label: "Password",
@@ -152,7 +153,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               isPassword: true,
                               isVisible: _isPasswordVisible,
                               controller: _passwordController,
-                              onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible)
+                              onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                              isDark: false
                           ),
 
                           Row(
@@ -162,12 +164,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                 children: [
                                   Checkbox(
                                     value: _rememberMe,
-                                    activeColor: accentCyan,
-                                    checkColor: Colors.black,
-                                    side: const BorderSide(color: Colors.grey),
+                                    activeColor: darkBlue,
+                                    checkColor: Colors.white,
+                                    side: BorderSide(color: darkBlue.withValues(alpha: 0.5)),
                                     onChanged: (val) => setState(() => _rememberMe = val!),
                                   ),
-                                  const Text("Remember me", style: TextStyle(color: Colors.grey)),
+                                  Text("Remember me", style: TextStyle(color: darkBlue.withValues(alpha: 0.7), fontWeight: FontWeight.w500)),
                                 ],
                               ),
                               TextButton(
@@ -177,7 +179,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
                                   );
                                 },
-                                child: const Text("Forget password?", style: TextStyle(color: Colors.white)),
+                                child: Text("Forget password?", style: TextStyle(color: darkBlue, fontWeight: FontWeight.w600)),
                               )
                             ],
                           ),
@@ -186,13 +188,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           ElevatedButton(
                             onPressed: _isLoading ? null : _handleSignIn,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: accentCyan,
-                              foregroundColor: Colors.black,
+                              backgroundColor: darkBlue,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 56),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                             ),
                             child: _isLoading
-                                ? const CircularProgressIndicator(color: Colors.black)
+                                ? const CircularProgressIndicator(color: Colors.white)
                                 : const Text("Sign in", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
 
@@ -207,11 +209,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               closedBuilder: (context, action) => GestureDetector(
                                 onTap: action,
                                 child: RichText(
-                                  text: const TextSpan(
+                                  text: TextSpan(
                                     text: "Don't have an account? ",
-                                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                                    style: TextStyle(color: darkBlue.withValues(alpha: 0.6), fontSize: 14),
                                     children: [
-                                      TextSpan(text: "sign up", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
+                                      TextSpan(text: "sign up", style: TextStyle(fontWeight: FontWeight.bold, color: darkBlue)),
                                     ],
                                   ),
                                 ),

@@ -644,7 +644,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         // Determine displayed text
         String mainText = "Touch to Speak";
-        String? subText = "Press the button to start";
+        String subText = "Press the button to start";
 
         if (isListening) {
           mainText = voiceProvider.realtimeText.isEmpty ? "Listening..." : voiceProvider.realtimeText;
@@ -714,10 +714,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     child: Text(mainText),
                   ),
                 ),
-                if (subText != null) ...[
-                  const SizedBox(height: 5),
-                  Text(subText, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-                ],
+                const SizedBox(height: 5),
+                Text(subText, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
               ],
             ),
           ),

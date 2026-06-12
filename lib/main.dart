@@ -31,7 +31,10 @@ void main() async {
       providers: [
         Provider(create: (_) => ApiService()),
         ChangeNotifierProvider(create: (_) => DevicePairingProvider()),
-        ChangeNotifierProvider(create: (_) => EdgeVoiceVoiceProvider()),
+        ChangeNotifierProxyProvider<DevicePairingProvider, EdgeVoiceVoiceProvider>(
+          create: (_) => EdgeVoiceVoiceProvider(),
+          update: (_, pairing, voice) => voice!..updatePairingProvider(pairing),
+        ),
       ],
       child: const MyApp(),
     ),

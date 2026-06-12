@@ -26,7 +26,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
   // Colors matching Home Screen
   final Color gradientStart = const Color(0xFF1E293B);
   final Color gradientEnd = const Color(0xFF5270A1);
-  final Color sheetColor = const Color(0xFF0F1115); // Darker bottom sheet
+  final Color sheetColor = const Color(0xFFECF1F9); // Light Background
+  final Color darkBlue = const Color(0xFF1E293B);
   final Color accentCyan = const Color(0xFF00F0FF);
 
   String? _validateInput() {
@@ -157,21 +158,21 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
                       decoration: BoxDecoration(
-                          color: sheetColor, // Dark Background
+                          color: sheetColor,
                           borderRadius: const BorderRadius.only(topLeft: Radius.circular(40), topRight: Radius.circular(40)),
-                          border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.1))) // Subtle border
+                          border: Border(top: BorderSide(color: darkBlue.withValues(alpha: 0.1)))
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Center(
-                            child: Text("Create Account", style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600, color: Colors.white)),
+                          Center(
+                            child: Text("Create Account", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: darkBlue)),
                           ),
                           const SizedBox(height: 30),
 
-                          buildTextField(label: "Full name", hint: "e.g. lucy", controller: _nameController),
+                          buildTextField(label: "Full name", hint: "e.g. lucy", controller: _nameController, isDark: false),
                           const SizedBox(height: 20),
-                          buildTextField(label: "Email", hint: "example@gmail.com", controller: _emailController),
+                          buildTextField(label: "Email", hint: "example@gmail.com", controller: _emailController, isDark: false),
                           const SizedBox(height: 20),
                           buildTextField(
                               label: "Password",
@@ -179,7 +180,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                               isPassword: true,
                               isVisible: _isPasswordVisible,
                               controller: _passwordController,
-                              onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible)
+                              onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                              isDark: false
                           ),
 
                           const SizedBox(height: 10),
@@ -188,11 +190,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text("• At least 8 characters", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                                Text("• At least 1 lowercase letter", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                                Text("• At least 1 uppercase letter", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                                Text("• At least 1 number", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                                Text("• At least 1 symbol (@, \$, !, %, *, ?, &)", style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                                Text("• At least 8 characters", style: TextStyle(fontSize: 12, color: darkBlue.withValues(alpha: 0.6))),
+                                Text("• At least 1 lowercase letter", style: TextStyle(fontSize: 12, color: darkBlue.withValues(alpha: 0.6))),
+                                Text("• At least 1 uppercase letter", style: TextStyle(fontSize: 12, color: darkBlue.withValues(alpha: 0.6))),
+                                Text("• At least 1 number", style: TextStyle(fontSize: 12, color: darkBlue.withValues(alpha: 0.6))),
+                                Text("• At least 1 symbol (@, \$, !, %, *, ?, &)", style: TextStyle(fontSize: 12, color: darkBlue.withValues(alpha: 0.6))),
                               ],
                             ),
                           ),
@@ -204,7 +206,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                               isPassword: true,
                               isVisible: _isConfirmPasswordVisible,
                               controller: _confirmController,
-                              onVisibilityToggle: () => setState(() => _isConfirmPasswordVisible = !_isConfirmPasswordVisible)
+                              onVisibilityToggle: () => setState(() => _isConfirmPasswordVisible = !_isConfirmPasswordVisible),
+                              isDark: false
                           ),
 
                           const SizedBox(height: 30),
@@ -212,13 +215,13 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                           ElevatedButton(
                             onPressed: _isLoading ? null : _handleSignUp,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: accentCyan, // Cyan Button
-                              foregroundColor: Colors.black,
+                              backgroundColor: darkBlue,
+                              foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 56),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                             ),
                             child: _isLoading
-                                ? const CircularProgressIndicator(color: Colors.black)
+                                ? const CircularProgressIndicator(color: Colors.white)
                                 : const Text("Sign up", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
 
@@ -233,11 +236,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                               closedBuilder: (context, action) => GestureDetector(
                                 onTap: action,
                                 child: RichText(
-                                  text: const TextSpan(
+                                  text: TextSpan(
                                     text: "Already have an account? ",
-                                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                                    style: TextStyle(color: darkBlue.withValues(alpha: 0.6), fontSize: 14),
                                     children: [
-                                      TextSpan(text: "sign in", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F0FF))),
+                                      TextSpan(text: "sign in", style: TextStyle(fontWeight: FontWeight.bold, color: darkBlue)),
                                     ],
                                   ),
                                 ),

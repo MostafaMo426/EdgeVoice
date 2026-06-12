@@ -3,12 +3,14 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../services/audio_feedback_service.dart';
 import '../services/api_service.dart';
+import 'device_pairing_provider.dart';
 
 class EdgeVoiceVoiceProvider extends ChangeNotifier {
   // Use dynamic to prevent type-check crashes during hot reload if library isn't linked
   dynamic _speech; 
   final AudioFeedbackService _audioFeedbackService = AudioFeedbackService();
   final ApiService _apiService = ApiService();
+  DevicePairingProvider? _pairingProvider;
 
   bool _isRecording = false;
   bool _isWaitingForServer = false;
@@ -32,6 +34,10 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   bool get isSpeaking => _isSpeaking;
   String? get lastTranscription => _lastTranscription;
   String get realtimeText => _realtimeText;
+
+  void updatePairingProvider(DevicePairingProvider provider) {
+    _pairingProvider = provider;
+  }
 
   Future<void> startRecording() async {
     final speech = _speechInstance;
@@ -82,6 +88,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
           },
           listenFor: const Duration(seconds: 30),
           pauseFor: const Duration(seconds: 2), 
+          localeId: "en-US", // Force English recognition
         );
       } else {
         _realtimeText = "Speech not available on this device";
@@ -107,7 +114,6 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     if (capturedText == "Processing..." || capturedText == "Listening...") capturedText = "";
     
     // IMMEDIATELY WIPE ALL STATE
-    // This ensures the UI reverts to "Touch to Speak" if nothing else happens
     _lastTranscription = null;
     _realtimeText = "";
     _isWaitingForServer = false;
@@ -115,15 +121,27 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     notifyListeners();
 
     if (capturedText.isNotEmpty) {
-      // Start processing phase
       _isWaitingForServer = true;
       notifyListeners();
 
       debugPrint("Processing text: $capturedText");
       
       try {
-        // Execute the command via API (Local TinyML logic handled by hardware)
-        await _apiService.executeVoiceCommand(capturedText);
+        bool sentViaBle = false;
+        
+        // AUTOMATIC HYBRID LOGIC
+        if (_pairingProvider != null && _pairingProvider!.isConnected) {
+          debugPrint("[HYBRID] Connected via BLE. Sending local command...");
+          sentViaBle = await _pairingProvider!.sendCommandViaBLE(capturedText);
+          if (sentViaBle) {
+            await _apiService.addLog("Command sent locally via BLE: $capturedText");
+          }
+        }
+
+        if (!sentViaBle) {
+          debugPrint("[HYBRID] No BLE connection or BLE failed. Sending via Cloud API...");
+          await _apiService.executeVoiceCommand(capturedText);
+        }
         
         // Short delay to show "Processing" state to user
         await Future.delayed(const Duration(milliseconds: 1500));
@@ -131,7 +149,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
       } catch (e) {
         debugPrint("Voice Processing Error: $e");
       } finally {
-        // FINAL RESET: Force back to "Touch to Speak" regardless of success/fail
+        // FINAL RESET
         _isWaitingForServer = false;
         _isSpeaking = false;
         _lastTranscription = null;
