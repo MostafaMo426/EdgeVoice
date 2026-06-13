@@ -177,14 +177,18 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     List<String> hardwareCommands = await _translateToHardwareCommands(text);
     _isWaitingForServer = true;
     
-    // Show interpreted command
-    String displayCmds = hardwareCommands.isEmpty ? "Unknown: $text" : "Interpreted: ${hardwareCommands.join(' ')}";
-    _realtimeText = displayCmds;
+    // Show user-friendly status instead of technical relay IDs
+    if (hardwareCommands.isEmpty) {
+      _realtimeText = "Unknown command: $text";
+    } else {
+      _realtimeText = "Executing: $text";
+    }
+    
     WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
-    debugPrint("[VOICE] ⚙️ $displayCmds");
+    debugPrint("[VOICE] ⚙️ Interpreted technical codes: ${hardwareCommands.join(' ')}");
 
-    // Let the user read the interpretation for 3.5 seconds
-    await Future.delayed(const Duration(milliseconds: 3500));
+    // Wait a moment for the user to see the "Executing" status
+    await Future.delayed(const Duration(milliseconds: 2000));
 
     for (var cmd in hardwareCommands) {
       if (_pairingProvider?.isConnected ?? false) {
