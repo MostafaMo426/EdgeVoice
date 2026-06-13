@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
@@ -19,7 +20,6 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   // Web Fallback (STT)
   stt.SpeechToText? _webSpeech;
 
-  // final AudioFeedbackService _audioFeedbackService = AudioFeedbackService();
   final ApiService _apiService = ApiService();
   DevicePairingProvider? _pairingProvider;
 
@@ -45,24 +45,51 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     notifyListeners();
 
     if (kIsWeb) {
+      debugPrint("[VOICE] 🌐 Initializing Web STT Engine...");
       _webSpeech = stt.SpeechToText();
       try {
-        bool available = await _webSpeech!.initialize();
-        debugPrint("[VOICE] Web STT Initialized: $available");
+        bool available = await _webSpeech!.initialize(
+          onStatus: (s) => debugPrint("[VOICE] Web STT Status: $s"),
+          onError: (e) => debugPrint("[VOICE] Web STT Error: $e"),
+        );
+        debugPrint("[VOICE] Web STT Available: $available");
       } catch (e) {
-        debugPrint("[VOICE] Web STT Init Error: $e");
+        debugPrint("[VOICE] Web STT Init Exception: $e");
       }
     } else {
       try {
+        debugPrint("[VOICE] 📱 Initializing Vosk Offline Engine...");
         _vosk = VoskFlutterPlugin.instance();
-        // The user must zip their model folder to assets/models/en-us.zip
+        
+        // 1. Extract model from assets
+        // This copies en-us.zip from assets to app documents and unzips it.
         final modelPath = await ModelLoader().loadFromAssets('assets/models/en-us.zip');
-        _model = await _vosk!.createModel(modelPath);
+        debugPrint("[VOICE] Model base directory: $modelPath");
+
+        // 2. SMART PATH CHECK (Handle nested zip issues)
+        String finalModelPath = modelPath;
+        // If the user zipped the folder 'en-us' instead of the contents, 
+        // the files are in en-us/en-us/.
+        Directory dir = Directory(modelPath);
+        if (dir.existsSync()) {
+          List<FileSystemEntity> entities = dir.listSync();
+          // Check if there's only one item and it's a directory named en-us
+          if (entities.length == 1 && entities.first is Directory && entities.first.path.endsWith("en-us")) {
+             debugPrint("[VOICE] 📂 Detected nested model folder. Adjusting path...");
+             finalModelPath = entities.first.path;
+          }
+        }
+        
+        debugPrint("[VOICE] Final Model Path used: $finalModelPath");
+
+        // 3. Create Model and Recognizer
+        _model = await _vosk!.createModel(finalModelPath);
         _recognizer = await _vosk!.createRecognizer(model: _model!, sampleRate: 16000);
-        debugPrint("[VOICE] Vosk Offline Engine Initialized");
+        
+        debugPrint("[VOICE] ✅ Vosk Engine Ready for Offline commands");
       } catch (e) {
-        debugPrint("[VOICE] Vosk Init Error: $e");
-        _realtimeText = "Vosk model missing or error. Check assets/models/en-us.zip";
+        debugPrint("[VOICE] ❌ Vosk Fatal Init Error: $e");
+        _realtimeText = "Voice Error. Restart App.";
       }
     }
 
@@ -75,21 +102,40 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   }
 
   Future<void> startRecording() async {
-    if (_isInitializing) return;
+    if (_isInitializing) {
+      debugPrint("[VOICE] ⏳ Blocked: Engine still initializing...");
+      return;
+    }
+
+    // RESET ALL STATE FOR A FRESH SESSION
+    _lastTranscription = null;
+    _realtimeText = "";
+    notifyListeners();
+    debugPrint("[VOICE] 🎤 Starting fresh session...");
 
     if (kIsWeb) {
       if (_webSpeech == null) return;
-      await _webSpeech!.listen(
-        onResult: (result) {
-          _realtimeText = result.recognizedWords;
-          if (result.finalResult) _lastTranscription = result.recognizedWords;
-          notifyListeners();
-        },
-      );
-      _isRecording = true;
-      notifyListeners();
+      try {
+        _isRecording = true;
+        await _webSpeech!.listen(
+          onResult: (result) {
+            _realtimeText = result.recognizedWords;
+            if (result.finalResult) {
+               _lastTranscription = result.recognizedWords;
+               debugPrint("[VOICE] Web Result: ${result.recognizedWords}");
+            }
+            notifyListeners();
+          },
+        );
+        notifyListeners();
+      } catch (e) {
+        debugPrint("[VOICE] Web Listen Error: $e");
+        _isRecording = false;
+        _realtimeText = "Browser MIC error";
+        notifyListeners();
+      }
     } else {
-      // Mobile Logic
+      // Mobile Vosk Path
       if (_model == null) {
         await _initEngine();
         if (_model == null) return;
@@ -97,6 +143,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
 
       if (await Permission.microphone.request().isGranted) {
         try {
+          debugPrint("[VOICE] 🔊 Starting local speech service...");
           _speechService = await _vosk!.initSpeechService(_recognizer!);
           
           _isRecording = true;
@@ -107,36 +154,44 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
           _speechService!.onPartial().listen((partial) {
             try {
               final data = jsonDecode(partial);
-              String text = data['partial'] ?? "";
+              String text = (data['partial'] ?? "").toString().trim();
               if (text.isNotEmpty) {
                 _realtimeText = text;
-                WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
+                // Use a safe notification
+                if (_isRecording) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
+                }
               }
             } catch (e) {
-              debugPrint("Vosk Partial Error: $e");
+              debugPrint("Vosk Partial Parse Error: $e");
             }
           });
 
           _speechService!.onResult().listen((result) {
             try {
               final data = jsonDecode(result);
-              String text = data['text'] ?? "";
+              String text = (data['text'] ?? "").toString().trim();
               if (text.isNotEmpty) {
+                debugPrint("[VOICE] 📝 Local Final Result: $text");
                 _lastTranscription = text;
                 _realtimeText = text;
                 WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
               }
             } catch (e) {
-              debugPrint("Vosk Result Error: $e");
+              debugPrint("Vosk Result Parse Error: $e");
             }
           });
 
           await _speechService!.start();
         } catch (e) {
-          debugPrint("Vosk Start Error: $e");
+          debugPrint("Vosk runtime error: $e");
           _isRecording = false;
+          _realtimeText = "Vosk start failed";
           notifyListeners();
         }
+      } else {
+        _realtimeText = "Microphone Permission Required";
+        notifyListeners();
       }
     }
   }
@@ -144,6 +199,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
   Future<void> stopAndProcess() async {
     if (!_isRecording) return;
 
+    debugPrint("[VOICE] 🛑 Stopping microphone...");
     if (kIsWeb) {
       await _webSpeech?.stop();
     } else {
@@ -151,25 +207,31 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     }
     
     _isRecording = false;
-    // Prioritize the last formal transcription, fallback to the last partial we heard
-    String capturedText = (_lastTranscription ?? _realtimeText).trim();
     
-    // Check if the captured text is just the initial placeholder
+    // DELAY: Give the recognizer a moment to emit the final 'onResult'
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // CAPTURE FINAL TEXT
+    String capturedText = (_lastTranscription ?? _realtimeText).trim();
+    debugPrint("[VOICE] Processing final capture: '$capturedText'");
+    
+    // Check if the captured text is just the initial placeholder or empty
     if (capturedText.toLowerCase().contains("listening") || capturedText.isEmpty) {
+      debugPrint("[VOICE] ⚠️ No valid speech detected. Resetting.");
       _lastTranscription = null;
       _realtimeText = "";
       notifyListeners();
       return;
     }
 
-    // 1. Keep the "Captured" text visible for a moment so the user can read it
+    // UI Feedback: Show "Captured" for a moment
     _realtimeText = "Captured: $capturedText";
     _lastTranscription = capturedText;
     notifyListeners();
-    debugPrint("[VOICE] 📝 CAPTURED TEXT: $capturedText");
-    await Future.delayed(const Duration(milliseconds: 2500)); 
+    
+    await Future.delayed(const Duration(milliseconds: 2000)); 
 
-    // 2. Process and Interpret
+    // PROCESS COMMAND
     await _processCommand(capturedText);
   }
 
@@ -177,7 +239,6 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     List<String> hardwareCommands = await _translateToHardwareCommands(text);
     _isWaitingForServer = true;
     
-    // Show user-friendly status instead of technical relay IDs
     if (hardwareCommands.isEmpty) {
       _realtimeText = "Unknown command: $text";
     } else {
@@ -185,15 +246,13 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     }
     
     WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
-    debugPrint("[VOICE] ⚙️ Interpreted technical codes: ${hardwareCommands.join(' ')}");
+    debugPrint("[VOICE] Interpreted технические codes: ${hardwareCommands.join(' ')}");
 
-    // Wait a moment for the user to see the "Executing" status
     await Future.delayed(const Duration(milliseconds: 2000));
 
     for (var cmd in hardwareCommands) {
       if (_pairingProvider?.isConnected ?? false) {
-        // Await each command to prevent flooding
-        debugPrint("[VOICE] 🚀 Sending Interpreted Command: $cmd");
+        debugPrint("[VOICE] 🚀 BLE SEND: $cmd");
         await _pairingProvider!.sendCommandViaBLE(cmd);
         
         String logDeviceName = "Device ($cmd)";
@@ -204,16 +263,18 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
 
         _apiService.addLog("Voice Command: $text -> $logDeviceName");
         
-        // Brief pause between sequential commands
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Wait between commands
+        await Future.delayed(const Duration(milliseconds: 800));
+      } else {
+        debugPrint("[VOICE] ❌ Cannot send: Arduino not connected");
       }
     }
     
-    // Keep visible for 1 more second after sending
+    // Reset screen
     await Future.delayed(const Duration(seconds: 1));
-    
     _isWaitingForServer = false;
     _lastTranscription = null;
+    _realtimeText = "";
     notifyListeners();
   }
 
@@ -221,32 +282,26 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     text = text.toLowerCase();
     String action = text.contains("off") || text.contains("close") ? "OFF" : "ON";
     
-    // PROJECT-SPECIFIC RELAY MAPPING RULES:
-    // R1 => Living Room Lights
-    // R2 => Living Room AC
-    // R3 => Bedroom Lights
-    // R4 => Bedroom TV
+    // GLOBAL MODES
+    if (text.contains("night")) return ["R1OFF", "R2OFF", "R3OFF", "R4OFF"];
+    if (text.contains("day") || text.contains("morning")) return ["R1ON", "R2ON", "R3ON", "R4ON"];
 
-    // 1. HANDLE GLOBAL MODES (Day/Night)
-    if (text.contains("night")) {
-      // Night Mode => Everything OFF
-      return ["R1OFF", "R2OFF", "R3OFF", "R4OFF"];
-    }
-    if (text.contains("day") || text.contains("morning")) {
-      // Day Mode => Everything ON
-      return ["R1ON", "R2ON", "R3ON", "R4ON"];
-    }
-
-    // 2. INDIVIDUAL DEVICE MAPPINGS
-    if (text.contains("living") && (text.contains("light") || text.contains("lamp"))) return ["R1$action"];
-    if (text.contains("living") && (text.contains("ac") || text.contains("air") || text.contains("unit"))) return ["R2$action"];
-    if (text.contains("bed") && (text.contains("light") || text.contains("lamp"))) return ["R3$action"];
-    if (text.contains("bed") && (text.contains("tv") || text.contains("television"))) return ["R4$action"];
+    // Indivdual relay checks based on mapping:
+    // R1: Living Lights
+    // R2: AC Unit
+    // R3: Bed Lights
+    // R4: Bed TV
     
-    // Default fallback
-    if (text.contains("light")) return ["R1$action"];
-    if (text.contains("ac") || text.contains("air")) return ["R2$action"];
-    if (text.contains("tv") || text.contains("television")) return ["R4$action"];
+    // SPECIFIC DEVICES (Keyword Priority)
+    if (text.contains("living") && (text.contains("light") || text.contains("lamp") || text.contains("bulb"))) return ["R1$action"];
+    if (text.contains("ac") || text.contains("air") || text.contains("cool") || (text.contains("living") && text.contains("unit"))) return ["R2$action"];
+    if (text.contains("bed") && (text.contains("light") || text.contains("lamp") || text.contains("bulb"))) return ["R3$action"];
+    if (text.contains("tv") || text.contains("television") || (text.contains("bed") && text.contains("screen"))) return ["R4$action"];
+    
+    // Fallbacks (If room not mentioned)
+    if (text.contains("light") || text.contains("lamp")) return ["R1$action"];
+    if (text.contains("fan") || text.contains("vent")) return ["R2$action"]; // Map R2 for generic climate
+    if (text.contains("television")) return ["R4$action"];
 
     return [];
   }

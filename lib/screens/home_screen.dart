@@ -376,21 +376,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Icons.room;
   }
 
-  IconData _getDeviceIcon(String type) {
-    type = type.toLowerCase().trim();
-    if (type.contains("light")) return Icons.lightbulb_outline;
-    if (type.contains("tv") || type.contains("television")) return Icons.tv;
-    if (type.contains("ac") || type.contains("air")) return Icons.ac_unit;
-    if (type.contains("curtain")) return Icons.curtains;
-    if (type.contains("fan")) return Icons.air;
-    if (type.contains("door")) return Icons.door_front_door;
-    if (type.contains("coffee")) return Icons.coffee;
-    if (type.contains("fridge") || type.contains("refrigerator")) return Icons.kitchen;
-    if (type.contains("fryer")) return Icons.outdoor_grill;
-    if (type.contains("wash") || type.contains("laundry")) return Icons.local_laundry_service;
-    if (type.contains("dryer")) return Icons.dry;
-    if (type.contains("vacuum")) return Icons.cleaning_services;
-    if (type.contains("humidifier")) return Icons.water_drop;
+  IconData _getDeviceIcon(String type, String name) {
+    String combined = "${type.toLowerCase()} ${name.toLowerCase()}".trim();
+    if (combined.isEmpty) return Icons.device_hub;
+
+    if (combined.contains("light") || combined.contains("lamp")) return Icons.lightbulb_outline;
+    if (combined.contains("tv") || combined.contains("television")) return Icons.tv;
+    if (combined.contains("ac") || combined.contains("air") || combined.contains("unit")) return Icons.ac_unit;
+    if (combined.contains("curtain")) return Icons.curtains;
+    if (combined.contains("fan") || combined.contains("vent")) return Icons.air;
+    if (combined.contains("door") || combined.contains("lock")) return Icons.door_front_door;
+    if (combined.contains("coffee")) return Icons.coffee;
+    if (combined.contains("fridge") || combined.contains("refrigerator") || combined.contains("kitchen")) return Icons.kitchen;
+    if (combined.contains("fryer")) return Icons.outdoor_grill;
+    if (combined.contains("wash") || combined.contains("laundry")) return Icons.local_laundry_service;
+    if (combined.contains("dryer")) return Icons.dry;
+    if (combined.contains("vacuum")) return Icons.cleaning_services;
+    if (combined.contains("humidifier")) return Icons.water_drop;
+    
     return Icons.device_hub;
   }
 
@@ -578,15 +581,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       List<dynamic> enrichedRooms = [];
       for (var room in rooms) {
         final rId = room['id'] ?? room['Id'] ?? 0;
-        final rName = room['name'] ?? room['Name'] ?? "Room";
+        final rName = (room['name'] ?? room['Name'] ?? "Room").toString();
         
         final devices = await apiService.getRoomDevices(rId);
-        room['devices'] = devices; // Normalize for UI usage
+        
+        // RECOVERY: If devices come with empty names, try to assign them based on type
+        for (var device in devices) {
+          String name = (device['name'] ?? device['Name'] ?? "").toString().trim();
+          String type = (device['type'] ?? device['Type'] ?? "").toString().trim();
+          
+          if (name.isEmpty) {
+            if (type.toLowerCase().contains("light")) device['name'] = "Lights";
+            else if (type.toLowerCase().contains("ac") || type.toLowerCase().contains("air")) device['name'] = "AC Unit";
+            else if (type.toLowerCase().contains("tv")) device['name'] = "TV";
+            else device['name'] = "Device";
+          }
+        }
+        
+        room['devices'] = devices; 
         enrichedRooms.add(room);
         
-        // Sync legacy deviceStates with API data using flexible keys
+        // Sync master state
         for (var device in devices) {
-          String dName = device['name'] ?? device['Name'] ?? "";
+          String dName = (device['name'] ?? device['Name'] ?? "").toString();
           bool dStatus = device['isOn'] ?? device['IsOn'] ?? device['status'] ?? false;
           
           String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
@@ -769,12 +786,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                   _getRoomIcon(roomName),
                                   roomDevices.take(3).map<Widget>((device) {
                                     // Handle Case-Insensitivity from API (name vs Name, type vs Type)
-                                    final dName = device['name'] ?? device['Name'] ?? "Device";
-                                    final dType = device['type'] ?? device['Type'] ?? "";
+                                    String dName = (device['name'] ?? device['Name'] ?? "Device").toString();
+                                    if (dName.trim().isEmpty) dName = "Device";
+                                    
+                                    final dType = (device['type'] ?? device['Type'] ?? "").toString();
                                     final dStatus = device['isOn'] ?? device['IsOn'] ?? device['status'] ?? false;
 
                                     return DeviceToggle(
-                                      icon: _getDeviceIcon(dType),
+                                      icon: _getDeviceIcon(dType, dName),
                                       label: "$dName\n${dStatus ? 'On' : 'Off'}",
                                       isActive: dStatus,
                                       onTap: () {
@@ -1181,7 +1200,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           children: [
                             Row(
                               children: [
-                                Icon(_getDeviceIcon(device['type'] ?? device['Type'] ?? ""), color: accentCyan),
+                                Icon(_getDeviceIcon(device['type'] ?? device['Type'] ?? "", device['name'] ?? device['Name'] ?? ""), color: accentCyan),
                                 const SizedBox(width: 15),
                                 Text(device['name'] ?? device['Name'] ?? "Device", style: const TextStyle(color: Colors.white, fontSize: 16)),
                               ],
