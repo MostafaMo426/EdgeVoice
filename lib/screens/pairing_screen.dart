@@ -52,7 +52,12 @@ class _PairingScreenState extends State<PairingScreen> {
     setState(() => _isScanning = true);
     
     try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
+      // For Web security, we MUST provide the service UUID during the scan
+      // so the browser allows us to access it later.
+      await FlutterBluePlus.startScan(
+        withServices: [Guid(DevicePairingProvider.SERVICE_UUID)],
+        timeout: const Duration(seconds: 15)
+      );
     } catch (e) {
       debugPrint("Error starting scan: $e");
     }

@@ -7,6 +7,7 @@ import 'logs_screen.dart'; // Import Logs Screen
 import 'rooms_screen.dart'; // Import Rooms Screen
 import '../services/api_service.dart'; // Import API Service
 import '../providers/edgevoice_voice_provider.dart';
+import '../providers/device_pairing_provider.dart';
 import '../config.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -58,6 +59,99 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _loadInitialStates();
     _loadProfileImage();
     _startPolling();
+    
+    // Listen for hardware status updates from BLE
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+      pairingProvider.addListener(_onHardwareStatusChanged);
+      
+      // Perform an initial sync if hardware states already exist
+      if (pairingProvider.isConnected && pairingProvider.hardwareDeviceStates.isNotEmpty) {
+        _onHardwareStatusChanged();
+      }
+    });
+  }
+
+  void _onHardwareStatusChanged() {
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    final apiService = Provider.of<ApiService>(context, listen: false);
+
+    if (pairingProvider.isConnected && pairingProvider.hardwareDeviceStates.isNotEmpty) {
+      debugPrint("[BLE] DEBUG FEEDBACK: ${pairingProvider.hardwareDeviceStates}");
+      
+      bool hasChanged = false;
+      pairingProvider.hardwareDeviceStates.forEach((relay, isOn) {
+        // PROJECT-SPECIFIC RELAY MAPPING RULES FOR FEEDBACK:
+        // R1 => living_lights
+        // R2 => ac_unit
+        // R3 => bed_lights
+        // R4 => living_tv (Mapping R4 to living_tv key per user request)
+
+        String targetLegacyKey = "";
+        if (relay == "R1") targetLegacyKey = "living_lights";
+        if (relay == "R2") targetLegacyKey = "ac_unit"; 
+        if (relay == "R3") targetLegacyKey = "bed_lights";
+        if (relay == "R4") targetLegacyKey = "living_tv"; 
+
+        if (targetLegacyKey.isNotEmpty) {
+          if (deviceStates[targetLegacyKey] != isOn) {
+            debugPrint("[SYNC] Live Update: Relay $relay (${targetLegacyKey}) flipped to $isOn");
+            _updateUiStateForLegacyKey(targetLegacyKey, isOn);
+            hasChanged = true;
+            
+            // Sync to cloud silently
+            final device = _findDeviceByLegacyKey(targetLegacyKey);
+            if (device != null) {
+              apiService.updateDeviceStatus(device['id'] ?? device['Id'], isOn).catchError((_) => false);
+            }
+          }
+        }
+      });
+
+      if (hasChanged && mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Hardware Update: ${pairingProvider.hardwareDeviceStates}"),
+          duration: const Duration(seconds: 1),
+          backgroundColor: Colors.cyan[900],
+        ));
+      }
+    }
+  }
+
+  /// Helper to check if a Relay matches a UI Legacy Key
+  bool _isRelayMatch(String relay, String key) {
+    if (relay == "R1") return key == 'living_lights';
+    if (relay == "R2") return key == 'ac_unit';
+    if (relay == "R3") return key == 'bed_lights';
+    if (relay == "R4") return key == 'living_tv';
+    return false;
+  }
+
+
+  /// Helper for API/Manual updates to keep both data structures in sync
+  void _updateUiStateForLegacyKey(String key, bool isOn) {
+    setState(() {
+      // Update legacy map
+      if (deviceStates.containsKey(key)) {
+        deviceStates[key] = isOn;
+      }
+      
+      // Update dynamic rooms list with case-insensitive property checks
+      for (var room in _rooms) {
+        final devices = (room['devices'] ?? room['Devices']) as List? ?? [];
+        for (var device in devices) {
+          String dName = device['name'] ?? device['Name'] ?? "";
+          String rName = room['name'] ?? room['Name'] ?? "";
+          String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
+          if (legacyKey == key) {
+            if (device.containsKey('isOn')) device['isOn'] = isOn;
+            if (device.containsKey('IsOn')) device['IsOn'] = isOn;
+            device['status'] = isOn;
+          }
+        }
+      }
+    });
   }
 
   Future<void> _loadProfileImage() async {
@@ -72,32 +166,53 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   // --- REUSABLE UPDATE METHOD ---
   Future<void> _updateDevice(String key, bool state, {bool silent = false}) async {
     final apiService = Provider.of<ApiService>(context, listen: false);
-    if (deviceStates.containsKey(key)) {
-      setState(() {
-        deviceStates[key] = state;
-      });
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
 
-      // Find actual device ID if possible and update status via API
-      final device = _findDeviceByLegacyKey(key);
-      if (device != null) {
-        try {
-          await apiService.updateDeviceStatus(device['id'], state);
-          setState(() {
-            device['isOn'] = state;
-          device['status'] = state;
-          });
-        } catch (e) {
-          debugPrint("API Error updating device status: $e");
-        }
+    if (deviceStates.containsKey(key)) {
+      // Immediate UI update for high responsiveness
+      _updateUiStateForLegacyKey(key, state);
+
+      // 1. Determine hardware mapping
+      String roomName = "";
+      String deviceName = "";
+      
+      if (key == 'ac_unit') {
+        roomName = "Living Room";
+        deviceName = "AC";
+      } else if (key == 'living_tv') {
+        roomName = "Bedroom"; // Mapping per user request: Bedroom TV -> R4
+        deviceName = "TV";
+      } else {
+        if (key.startsWith("living")) roomName = "Living Room";
+        if (key.startsWith("bed")) roomName = "Bedroom";
+        if (key.startsWith("kitchen")) roomName = "Kitchen";
+        deviceName = key.split("_").last;
       }
 
-      // Send to API with new format (Commands and Logs)
-      String action = state ? "Turn ON" : "Turn OFF";
-      try {
-        await apiService.addCommand(triggerWord: "Toggle $key", action: "$action $key");
-        await apiService.addLog("User turned $key ${state ? 'ON' : 'OFF'}");
-      } catch (e) {
-        debugPrint("Error syncing logs with server: $e");
+      String hardwareCommand = _mapToHardwareCommand(roomName, deviceName, state);
+      bool sentViaBle = false;
+
+      // 2. Send via BLE if connected (PRIORITY - Works Offline)
+      if (pairingProvider.isConnected) {
+        // Fire-and-forget BLE command for maximum perceived speed
+        pairingProvider.sendCommandViaBLE(hardwareCommand);
+        sentViaBle = true; // Assume success for UI speed
+        
+        // Log locally without awaiting
+        String readableName = key.replaceAll('_', ' ');
+        if (key == 'ac_unit') readableName = "AC Unit";
+        if (key == 'living_tv') readableName = "Bedroom TV";
+        apiService.addLog("Button Action via BLE: $readableName (${state ? 'ON' : 'OFF'})");
+      }
+
+      // 3. Fallback/Sync to Cloud (Requires Internet)
+      if (!sentViaBle) {
+        final device = _findDeviceByLegacyKey(key);
+        if (device != null) {
+          apiService.updateDeviceStatus(device['id'], state).catchError((_) => false);
+        }
+        String readableName = key.replaceAll('_', ' ');
+        apiService.addLog("Device toggled ${state ? 'on' : 'off'} : $readableName").catchError((_) => false);
       }
 
       if (!silent && mounted) {
@@ -110,24 +225,58 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  // Fallback for dynamic devices not in legacy mapping
+  // Fallback for dynamic devices
   Future<void> _updateDeviceDynamic(dynamic device, bool state) async {
     final apiService = Provider.of<ApiService>(context, listen: false);
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    
+    // Immediate UI update
+    setState(() {
+      device['isOn'] = state;
+      device['status'] = state;
+    });
+
+    String roomName = "";
+    // Try to find room name for this device
+    for(var room in _rooms) {
+      if ((room['devices'] as List).contains(device)) {
+        roomName = room['name'] ?? "";
+        break;
+      }
+    }
+
+    String deviceName = device['name'] ?? "";
+    String hardwareCommand = _mapToHardwareCommand(roomName, deviceName, state);
+    bool sentViaBle = false;
+
+    if (pairingProvider.isConnected) {
+      pairingProvider.sendCommandViaBLE(hardwareCommand);
+      sentViaBle = true;
+      apiService.addLog("Button Action via BLE: $deviceName (${state ? 'ON' : 'OFF'})");
+    }
+
     try {
       final success = await apiService.updateDeviceStatus(device['id'], state);
       if (success) {
-        setState(() {
-          device['isOn'] = state;
-          device['status'] = state;
-          // Also try to update legacy map if it exists
-          String? legacyKey = _mapDeviceToLegacyKey("", device['name'] ?? "");
-          if (legacyKey != null) deviceStates[legacyKey] = state;
-        });
-        await apiService.addLog("User turned ${device['name']} ${state ? 'ON' : 'OFF'}");
+        // Update entire UI state
+        String? legacyKey = _mapDeviceToLegacyKey(roomName, deviceName);
+        if (legacyKey != null) {
+          _updateUiStateForLegacyKey(legacyKey, state);
+        } else {
+          // Fallback if no legacy key exists
+          setState(() {
+            device['isOn'] = state;
+            device['status'] = state;
+          });
+        }
+        
+        if (!sentViaBle) {
+          await apiService.addLog("Device toggled ${state ? 'on' : 'off'} : $deviceName");
+        }
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("${device['name']}: ${state ? 'ON' : 'OFF'}"),
+            content: Text("$deviceName: ${state ? 'ON' : 'OFF'}"),
             backgroundColor: Colors.green,
             duration: const Duration(milliseconds: 500),
           ));
@@ -138,20 +287,53 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  String _mapToHardwareCommand(String roomName, String deviceName, bool state) {
+    roomName = roomName.toLowerCase();
+    deviceName = deviceName.toLowerCase();
+    String action = state ? "ON" : "OFF";
+
+    // PROJECT-SPECIFIC RELAY MAPPING RULES:
+    // R1 => Living Room Lights
+    // R2 => Living Room AC
+    // R3 => Bedroom Lights
+    // R4 => Bedroom TV
+
+    if (roomName.contains("living")) {
+      if (deviceName.contains("light") || deviceName.contains("lamp")) return "R1$action";
+      if (deviceName.contains("ac") || deviceName.contains("air") || deviceName.contains("unit")) return "R2$action";
+    } else if (roomName.contains("bed")) {
+      if (deviceName.contains("light") || deviceName.contains("lamp")) return "R3$action";
+      if (deviceName.contains("tv") || deviceName.contains("television")) return "R4$action";
+    }
+
+    // Default: Dynamic fallback
+    for (var room in _rooms) {
+      String rName = (room['name'] ?? room['Name'] ?? "").toLowerCase();
+      if (rName == roomName) {
+        final devices = (room['devices'] ?? room['Devices']) as List? ?? [];
+        for (int i = 0; i < devices.length; i++) {
+          String dName = (devices[i]['name'] ?? devices[i]['Name'] ?? "").toLowerCase();
+          if (dName == deviceName) {
+            return "R${(i % 4) + 1}$action";
+          }
+        }
+      }
+    }
+    
+    return "R1$action";
+  }
+
   String? _mapDeviceToLegacyKey(String roomName, String deviceName) {
     roomName = roomName.toLowerCase();
     deviceName = deviceName.toLowerCase();
     
     if (roomName.contains("living")) {
-      if (deviceName.contains("light")) return "living_lights";
-      if (deviceName.contains("tv")) return "living_tv";
+      if (deviceName.contains("light") || deviceName.contains("lamp")) return "living_lights";
+      if (deviceName.contains("ac") || deviceName.contains("air") || deviceName.contains("unit")) return "ac_unit";
     } else if (roomName.contains("bed")) {
-      if (deviceName.contains("light")) return "bed_lights";
+      if (deviceName.contains("light") || deviceName.contains("lamp")) return "bed_lights";
+      if (deviceName.contains("tv") || deviceName.contains("television")) return "living_tv"; // Mapping R4/Bedroom TV to living_tv key
       if (deviceName.contains("fan")) return "bed_fan";
-    } else if (roomName.contains("kitchen")) {
-      if (deviceName.contains("light")) return "kitchen_lights";
-      if (deviceName.contains("coffee")) return "kitchen_coffee";
-      if (deviceName.contains("fridge")) return "kitchen_fridge";
     }
     
     // Appliance mappings
@@ -170,9 +352,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   dynamic _findDeviceByLegacyKey(String key) {
     for (var room in _rooms) {
-      final devices = room['devices'] as List<dynamic>? ?? [];
+      final devices = (room['devices'] ?? room['Devices']) as List<dynamic>? ?? [];
       for (var device in devices) {
-        if (_mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "") == key) {
+        String dName = device['name'] ?? device['Name'] ?? "";
+        String rName = room['name'] ?? room['Name'] ?? "";
+        if (_mapDeviceToLegacyKey(rName, dName) == key) {
           return device;
         }
       }
@@ -211,7 +395,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // --- GROUP TOGGLES ---
   void _toggleLights() async {
-    // 1. Determine target state (if any light is on, turn all off)
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    final apiService = Provider.of<ApiService>(context, listen: false);
+
     bool anyOn = false;
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
@@ -222,12 +408,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
     bool target = !anyOn;
 
-    // 2. Update all light devices across all rooms
+    // Mapping: Lights toggle across all rooms -> Broadcast R1, R2, R3
+    List<String> commands = ["R1${target ? 'ON' : 'OFF'}", "R2${target ? 'ON' : 'OFF'}", "R3${target ? 'ON' : 'OFF'}"];
+    
+    for (var cmd in commands) {
+      if (pairingProvider.isConnected) {
+        await pairingProvider.sendCommandViaBLE(cmd);
+      }
+    }
+
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
       for (var device in devices) {
         if (device['type'] == 'Lights' || (device['name']?.toString().toLowerCase().contains('light') ?? false)) {
-          await _updateDeviceDynamic(device, target);
+          await apiService.updateDeviceStatus(device['id'], target);
+          setState(() {
+             device['isOn'] = target;
+             device['status'] = target;
+          });
         }
       }
     }
@@ -235,6 +433,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _toggleDoors() async {
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    final apiService = Provider.of<ApiService>(context, listen: false);
+
     bool anyOpen = false;
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
@@ -244,12 +445,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       }
     }
     bool target = !anyOpen;
+    String cmd = "R4${target ? 'ON' : 'OFF'}";
+
+    if (pairingProvider.isConnected) {
+      await pairingProvider.sendCommandViaBLE(cmd);
+    }
 
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
       for (var device in devices) {
         if (device['type'] == 'Door' || (device['name']?.toString().toLowerCase().contains('door') ?? false)) {
-          await _updateDeviceDynamic(device, target);
+          await apiService.updateDeviceStatus(device['id'], target);
+          setState(() {
+             device['isOn'] = target;
+             device['status'] = target;
+          });
         }
       }
     }
@@ -257,6 +467,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _toggleClimate() async {
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    final apiService = Provider.of<ApiService>(context, listen: false);
+
     List<String> climateTypes = ['AC', 'Fan', 'Humidifier'];
     bool anyOn = false;
     for (var room in _rooms) {
@@ -267,12 +480,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       }
     }
     bool target = !anyOn;
+    String cmd = "R4${target ? 'ON' : 'OFF'}";
+
+    if (pairingProvider.isConnected) {
+      await pairingProvider.sendCommandViaBLE(cmd);
+    }
 
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
       for (var device in devices) {
         if (climateTypes.contains(device['type']) || (device['name']?.toString().toLowerCase().contains('ac') ?? false)) {
-          await _updateDeviceDynamic(device, target);
+          await apiService.updateDeviceStatus(device['id'], target);
+          setState(() {
+             device['isOn'] = target;
+             device['status'] = target;
+          });
         }
       }
     }
@@ -280,7 +502,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _toggleSecurity() async {
-    // Security toggle: If anything is on, turn everything off.
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+    final apiService = Provider.of<ApiService>(context, listen: false);
+
     bool anyOn = false;
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
@@ -291,10 +515,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
     bool target = !anyOn;
     
+    // Security mapping: Turn everything ON/OFF across R1-R4
+    List<String> commands = ["R1", "R2", "R3", "R4"].map((r) => "$r${target ? 'ON' : 'OFF'}").toList();
+
+    for (var cmd in commands) {
+      if (pairingProvider.isConnected) {
+        await pairingProvider.sendCommandViaBLE(cmd);
+      }
+    }
+
     for (var room in _rooms) {
       final devices = room['devices'] as List? ?? [];
       for (var device in devices) {
-        await _updateDeviceDynamic(device, target);
+        await apiService.updateDeviceStatus(device['id'], target);
+        setState(() {
+           device['isOn'] = target;
+           device['status'] = target;
+        });
       }
     }
     
@@ -323,6 +560,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _pulseController.dispose();
+    // Remove the BLE listener
+    try {
+      final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+      pairingProvider.removeListener(_onHardwareStatusChanged);
+    } catch (_) {}
     super.dispose();
   }
 
@@ -334,15 +576,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final rooms = await apiService.getRooms();
       List<dynamic> enrichedRooms = [];
       for (var room in rooms) {
-        final devices = await apiService.getRoomDevices(room['id']);
-        room['devices'] = devices;
+        final rId = room['id'] ?? room['Id'] ?? 0;
+        final rName = room['name'] ?? room['Name'] ?? "Room";
+        
+        final devices = await apiService.getRoomDevices(rId);
+        room['devices'] = devices; // Normalize for UI usage
         enrichedRooms.add(room);
         
-        // Sync legacy deviceStates with API data
+        // Sync legacy deviceStates with API data using flexible keys
         for (var device in devices) {
-          String? legacyKey = _mapDeviceToLegacyKey(room['name'] ?? "", device['name'] ?? "");
+          String dName = device['name'] ?? device['Name'] ?? "";
+          bool dStatus = device['isOn'] ?? device['IsOn'] ?? device['status'] ?? false;
+          
+          String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
           if (legacyKey != null) {
-            deviceStates[legacyKey] = device['isOn'] ?? device['status'] ?? false;
+            deviceStates[legacyKey] = dStatus;
           }
         }
       }
@@ -373,29 +621,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _startPolling() async {
     final apiService = Provider.of<ApiService>(context, listen: false);
-    // Poll for pending commands every 10 seconds (Simulating Notifications)
+    final pairingProvider = Provider.of<DevicePairingProvider>(context, listen: false);
+
     while (mounted) {
-      await Future.delayed(const Duration(seconds: 10));
+      // If BLE is connected, we have real-time data. Poll cloud much slower (every 30s)
+      // If BLE is NOT connected, poll every 5s for cloud commands
+      int sleepSec = pairingProvider.isConnected ? 30 : 5;
+      await Future.delayed(Duration(seconds: sleepSec));
+      
       try {
-        final pending = await apiService.getPendingCommands();
+        // 1. Check Pending Commands (Only relevant for Cloud-to-App flow)
+        final pending = await apiService.getPendingCommands().timeout(const Duration(seconds: 3));
         if (pending.isNotEmpty && mounted) {
           for (var cmd in pending) {
             String action = cmd['action'] ?? "";
             bool state = action.toUpperCase().contains("ON");
-            
-            // SILENCED: No longer showing SnackBar notification
-            // _showNotification(action, state);
-            
-            // Sync local state if it matches a legacy key
-            if (deviceStates.containsKey(action)) {
-              setState(() => deviceStates[action] = state);
-            }
-            
-            await apiService.markCommandAsExecuted(cmd['id']);
+            _updateUiStateForLegacyKey(action, state);
+            apiService.markCommandAsExecuted(cmd['id']);
           }
         }
       } catch (e) {
-        debugPrint("Polling error: $e");
+        debugPrint("Cloud poll skipped: $e");
       }
     }
   }
@@ -521,16 +767,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                   "${roomDevices.length} devices active",
                                   _getRoomIcon(roomName),
                                   roomDevices.take(3).map<Widget>((device) {
+                                    // Handle Case-Insensitivity from API (name vs Name, type vs Type)
+                                    final dName = device['name'] ?? device['Name'] ?? "Device";
+                                    final dType = device['type'] ?? device['Type'] ?? "";
+                                    final dStatus = device['isOn'] ?? device['IsOn'] ?? device['status'] ?? false;
+
                                     return DeviceToggle(
-                                      icon: _getDeviceIcon(device['type'] ?? ""),
-                                      label: "${device['name']}\n${(device['isOn'] ?? device['status'] ?? false) ? 'On' : 'Off'}",
-                                      isActive: device['isOn'] ?? device['status'] ?? false,
+                                      icon: _getDeviceIcon(dType),
+                                      label: "$dName\n${dStatus ? 'On' : 'Off'}",
+                                      isActive: dStatus,
                                       onTap: () {
-                                        String? legacyKey = _mapDeviceToLegacyKey(roomName, device['name'] ?? "");
+                                        String? legacyKey = _mapDeviceToLegacyKey(roomName, dName);
                                         if (legacyKey != null) {
                                           toggleDevice(legacyKey);
                                         } else {
-                                          _updateDeviceDynamic(device, !(device['isOn'] ?? device['status'] ?? false));
+                                          _updateDeviceDynamic(device, !dStatus);
                                         }
                                       },
                                     );
@@ -779,7 +1030,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text("Smart Home", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                Text("AI Assistant", style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                Row(
+                  children: [
+                    Text("AI Assistant", style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Consumer<DevicePairingProvider>(
+                      builder: (context, pairing, _) => Icon(
+                        pairing.isConnected ? Icons.bluetooth_connected : Icons.cloud_done,
+                        size: 14,
+                        color: pairing.isConnected ? accentCyan : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ],
@@ -917,29 +1180,31 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           children: [
                             Row(
                               children: [
-                                Icon(_getDeviceIcon(device['type'] ?? ""), color: accentCyan),
+                                Icon(_getDeviceIcon(device['type'] ?? device['Type'] ?? ""), color: accentCyan),
                                 const SizedBox(width: 15),
-                                Text(device['name'] ?? "", style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                Text(device['name'] ?? device['Name'] ?? "Device", style: const TextStyle(color: Colors.white, fontSize: 16)),
                               ],
                             ),
                             Switch(
-                              value: device['isOn'] ?? device['status'] ?? false,
+                              value: device['isOn'] ?? device['IsOn'] ?? device['status'] ?? false,
                               activeThumbColor: accentCyan,
                               onChanged: (val) async {
                                 final apiService = Provider.of<ApiService>(context, listen: false);
-                                final success = await apiService.updateDeviceStatus(device['id'], val);
+                                final dId = device['id'] ?? device['Id'] ?? 0;
+                                final dName = device['name'] ?? device['Name'] ?? "Device";
+
+                                final success = await apiService.updateDeviceStatus(dId, val);
                                 if (success) {
-                                  // Update both internal state (for immediate UI) 
-                                  // and parent state (for consistency)
                                   setInternalState(() {
-                                    device['isOn'] = val;
+                                    if (device.containsKey('isOn')) device['isOn'] = val;
+                                    if (device.containsKey('IsOn')) device['IsOn'] = val;
                                     device['status'] = val;
                                   });
                                   setState(() {
-                                    String? legacyKey = _mapDeviceToLegacyKey(roomName, device['name'] ?? "");
+                                    String? legacyKey = _mapDeviceToLegacyKey(roomName, dName);
                                     if (legacyKey != null) deviceStates[legacyKey] = val;
                                   });
-                                  apiService.addLog("User turned ${device['name']} ${val ? 'ON' : 'OFF'}");
+                                  apiService.addLog("User turned $dName ${val ? 'ON' : 'OFF'}");
                                 }
                               },
                             ),

@@ -3,11 +3,13 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http_parser/http_parser.dart'; // Added for MediaType
+import 'package:http_parser/http_parser.dart';
 import '../config.dart';
+import 'local_cache_service.dart';
 
 class AuthService {
   late final Dio _dio;
+  final LocalCacheService _cache = LocalCacheService();
 
   AuthService() {
     _dio = Dio(BaseOptions(
@@ -164,6 +166,14 @@ class AuthService {
           await prefs.setString('profilePicture', profilePicture);
         }
         
+        // Cache user data for offline access
+        await _cache.saveUserData({
+          'userId': userId,
+          'fullName': fullName,
+          'email': userEmail,
+          'imagePath': profilePicture,
+        });
+
         await prefs.setBool('isLoggedIn', true);
         return null; 
       }
@@ -217,6 +227,9 @@ class AuthService {
               await prefs.setString('fullName', name.toString());
             }
             
+            // Cache full profile
+            await _cache.saveUserData(data);
+
             return data;
           }
         } catch (e) {
@@ -226,7 +239,9 @@ class AuthService {
     } catch (e) {
       debugPrint("Error fetching profile: $e");
     }
-    return null;
+    
+    // Offline fallback
+    return await _cache.getUserData();
   }
 
   // 4. Change Password

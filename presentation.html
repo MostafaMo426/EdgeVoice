@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeVoice - Mobile Presentation</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-deep: #0d0e12;
+            --bg-card: #161b22;
+            --accent-cyan: #00f2fe;
+            --accent-cyan-glow: rgba(0, 242, 254, 0.4);
+            --text-main: #ffffff;
+            --text-sub: #94a3b8;
+            --gradient-main: linear-gradient(135deg, #0d0e12 0%, #1a1f29 100%);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: #000;
+            color: var(--text-main);
+            overflow-x: hidden;
+        }
+
+        .presentation-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 100px;
+            padding: 50px 0;
+            background: radial-gradient(circle at top right, #1e293b, #000);
+        }
+
+        .slide {
+            width: 1280px;
+            height: 720px;
+            background: var(--bg-deep);
+            border: 1px solid rgba(0, 242, 254, 0.1);
+            border-radius: 20px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            padding: 60px;
+        }
+
+        .slide::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, transparent, var(--accent-cyan), transparent);
+            z-index: -1;
+            opacity: 0.1;
+        }
+
+        .ambient-glow {
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: var(--accent-cyan-glow);
+            filter: blur(150px);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        h1, h2, h3 {
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            z-index: 1;
+        }
+
+        h1 { font-size: 3.5rem; margin-bottom: 10px; text-shadow: 0 0 20px var(--accent-cyan-glow); }
+        h2 { font-size: 2.5rem; margin-bottom: 30px; border-left: 5px solid var(--accent-cyan); padding-left: 20px; }
+        p { font-size: 1.2rem; color: var(--text-sub); line-height: 1.6; z-index: 1; }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-top: 20px;
+            z-index: 1;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-top: 30px;
+            z-index: 1;
+        }
+
+        .tech-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+        }
+
+        .tech-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-cyan);
+            box-shadow: 0 10px 30px rgba(0, 242, 254, 0.1);
+        }
+
+        .tech-card i {
+            font-size: 2.5rem;
+            color: var(--accent-cyan);
+            margin-bottom: 15px;
+        }
+
+        .code-block {
+            background: #000;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 242, 254, 0.2);
+            font-family: 'Consolas', monospace;
+            color: #d1d5db;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            overflow-y: auto;
+        }
+
+        .slide-image {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 242, 254, 0.1);
+            background: #000;
+        }
+
+        .video-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1;
+        }
+
+        video {
+            width: 80%;
+            border-radius: 15px;
+            border: 2px solid var(--accent-cyan);
+            box-shadow: 0 0 30px var(--accent-cyan-glow);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        th, td {
+            padding: 20px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        th { background: rgba(0, 242, 254, 0.1); color: var(--accent-cyan); text-transform: uppercase; }
+
+        .step-list {
+            list-style: none;
+            z-index: 1;
+        }
+
+        .step-item {
+            margin-bottom: 25px;
+            padding-left: 60px;
+            position: relative;
+        }
+
+        .step-number {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 40px;
+            height: 40px;
+            background: var(--accent-cyan);
+            color: #000;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            box-shadow: 0 0 15px var(--accent-cyan-glow);
+        }
+
+        .divider {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .divider h2 {
+            font-size: 4rem;
+            border: none;
+            padding: 0;
+        }
+
+        .watermark {
+            position: absolute;
+            bottom: 20px;
+            right: 40px;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.2);
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="presentation-container">
+
+    <!-- SLIDE 1: TITLE -->
+    <div class="slide divider">
+        <div class="ambient-glow" style="top: 10%; left: 10%;"></div>
+        <div class="ambient-glow" style="bottom: 10%; right: 10%;"></div>
+        <h1>EdgeVoice</h1>
+        <p style="font-size: 1.8rem; letter-spacing: 5px; color: var(--accent-cyan);">Mobile Application</p>
+        <div style="height: 2px; width: 300px; background: var(--accent-cyan); margin: 30px 0;"></div>
+        <p>Graduation Project | Presented by team MTAREE4</p>
+        <div class="watermark">EDGEVOICE v1.0.0</div>
+    </div>
+
+    <!-- SLIDE 2: ROLE -->
+    <div class="slide">
+        <h2>01.1 Role of the Application</h2>
+        <div class="content-grid">
+            <div>
+                <p style="margin-bottom: 20px;">The Flutter application serves as the <strong>Primary Control Plane</strong> for the EdgeVoice ecosystem.</p>
+                <ul style="color: var(--text-sub); list-style: square; padding-left: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    <li><strong>Control Logic:</strong> Directs commands to the hardware via BLE or the cloud API.</li>
+                    <li><strong>User Interface:</strong> Provides a centralized, intuitive Cyberpunk-themed dashboard for cross-device management.</li>
+                    <li><strong>TinyML Bridge:</strong> Synchronizes with the Arduino Nano 33 BLE Sense local model execution.</li>
+                </ul>
+            </div>
+            <div style="background: var(--bg-card); border-radius: 15px; padding: 30px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--accent-cyan);">
+                <i class="fa-solid fa-microchip" style="font-size: 8rem; color: var(--accent-cyan); opacity: 0.8;"></i>
+            </div>
+        </div>
+        <div class="watermark">SECTION: PROJECT OVERVIEW</div>
+    </div>
+
+    <!-- SLIDE 3: DUAL-PATH -->
+    <div class="slide">
+        <h2>01.2 Dual-Path Communication</h2>
+        <div class="content-grid">
+            <div style="display: flex; flex-direction: column; justify-content: center;">
+                <h3 style="margin-bottom: 15px;">Hybrid Connectivity</h3>
+                <p>Ensuring 100% uptime through <strong>Local & Remote</strong> strategies:</p>
+                <div style="margin-top: 20px; border-left: 3px solid #fff; padding-left: 15px;">
+                    <p><strong>PROXIMITY:</strong> Direct <strong>BLE</strong> (Bluetooth Low Energy) link for ultra-low latency commands.</p>
+                    <p style="margin-top: 10px;"><strong>REMOTE:</strong> Global sync via <strong>.NET REST API</strong> over HTTPS for out-of-home control.</p>
+                </div>
+            </div>
+            <div>
+                <img src="docs/images/architecture_diagram.png" alt="Architecture Diagram" class="slide-image">
+                <p style="font-size: 0.9rem; text-align: center; margin-top: 10px;">System Flow: User ↔ Flutter ↔ Backend/Hardware</p>
+            </div>
+        </div>
+        <div class="watermark">SECTION: ARCHITECTURE</div>
+    </div>
+
+    <!-- SLIDE 4: DIVIDER 1 -->
+    <div class="slide divider">
+        <h2>02. Tech Stack</h2>
+        <p>Software Architecture & Subsystems</p>
+    </div>
+
+    <!-- SLIDE 5: CORE SUBSYSTEMS -->
+    <div class="slide">
+        <h2>02.1 Core Subsystems</h2>
+        <div class="card-grid">
+            <div class="tech-card">
+                <i class="fa-solid fa-layer-group"></i>
+                <h3>Provider</h3>
+                <p style="font-size: 0.9rem;">State Management & Dependency Injection</p>
+            </div>
+            <div class="tech-card">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <h3>Dio / API</h3>
+                <p style="font-size: 0.9rem;">RESTful Networking & Multipart Profile Uploads</p>
+            </div>
+            <div class="tech-card">
+                <i class="fa-solid fa-microchip"></i>
+                <h3>TinyML</h3>
+                <p style="font-size: 0.9rem;">Local Hardware Model Execution (Arduino)</p>
+            </div>
+            <div class="tech-card">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <h3>Animations</h3>
+                <p style="font-size: 0.9rem;">Material Motion & Container Transforms</p>
+            </div>
+            <div class="tech-card">
+                <i class="fa-solid fa-microphone-lines"></i>
+                <h3>Audio Core</h3>
+                <p style="font-size: 0.9rem;">Speech-to-Text & Silence Detection (record)</p>
+            </div>
+            <div class="tech-card">
+                <i class="fa-solid fa-database"></i>
+                <h3>Persistence</h3>
+                <p style="font-size: 0.9rem;">Shared Preferences for JWT Secure Storage</p>
+            </div>
+        </div>
+        <div class="watermark">SECTION: TECH STACK</div>
+    </div>
+
+    <!-- SLIDE 6: DIRECTORY DESIGN -->
+    <div class="slide">
+        <h2>03.0 Layered Directory Design</h2>
+        <div class="content-grid" style="grid-template-columns: 1fr 1.5fr;">
+            <div class="code-block">
+lib/<br>
+├── providers/<br>
+│   ├── device_pairing_provider.dart<br>
+│   └── edgevoice_voice_provider.dart<br>
+├── screens/<br>
+│   ├── home_screen.dart<br>
+│   ├── rooms_screen.dart<br>
+│   └── login_screen.dart<br>
+├── services/<br>
+│   ├── api_service.dart<br>
+│   └── auth_service.dart<br>
+└── widgets/<br>
+    └── custom_widgets.dart
+            </div>
+            <div style="display: flex; flex-direction: column; justify-content: center;">
+                <h3 style="margin-bottom: 10px;">Clean Architecture</h3>
+                <p>Decoupled components for high maintainability:</p>
+                <p style="margin-top: 15px;"><strong>PROVIDERS:</strong> Encapsulated Business Logic.</p>
+                <p><strong>SCREENS:</strong> Atomic View Components.</p>
+                <p><strong>SERVICES:</strong> Hardware/API Communication Wrappers.</p>
+                <p><strong>WIDGETS:</strong> Reusable Cyberpunk UI Elements.</p>
+            </div>
+        </div>
+        <div class="watermark">SECTION: DIRECTORY STRUCTURE</div>
+    </div>
+
+    <!-- SLIDE 7: DIVIDER 2 -->
+    <div class="slide divider">
+        <h2>03. Core Features</h2>
+        <p>Interface & Client-side Execution</p>
+    </div>
+
+    <!-- SLIDE 8: UI DASHBOARD -->
+    <div class="slide">
+        <h2>04.1 Cyberpunk Dashboard</h2>
+        <div class="content-grid">
+            <div>
+                <img src="docs/images/home_screen.png" alt="Home Screen" class="slide-image">
+                <p style="font-size: 0.9rem; text-align: center; margin-top: 5px;">Main Interface / Mic Interaction</p>
+            </div>
+            <div>
+                <img src="docs/images/rooms_view.png" alt="Rooms Grid" class="slide-image">
+                <p style="font-size: 0.9rem; text-align: center; margin-top: 5px;">Grid-based Room & Device Toggling</p>
+            </div>
+        </div>
+        <div style="margin-top: 25px;">
+            <p>Adaptive UI featuring a pulsing mic interaction, real-time device status polling (10s intervals), and high-fidelity room detail morphing.</p>
+        </div>
+        <div class="watermark">SECTION: CORE UI</div>
+    </div>
+
+    <!-- SLIDE 9: AI & IDENTITY -->
+    <div class="slide">
+        <h2>04.2 TinyML & Identity Management</h2>
+        <div class="content-grid">
+            <div style="display: flex; flex-direction: column; justify-content: center;">
+                <h3>TinyML Command Logic</h3>
+                <p>Local keyword spotting and command inference running on the Arduino Nano hardware for maximum privacy and low latency.</p>
+
+                <h3 style="margin-top: 30px;">JWT Authentication</h3>
+                <p>Multi-stage login with <strong>XFile Profile Upload</strong>. Persistence handled via token validation across sessions.</p>
+            </div>
+            <div>
+                <img src="docs/images/voice_ui.png" alt="Voice AI Interface" class="slide-image">
+                <p style="font-size: 0.9rem; text-align: center; margin-top: 10px;">Live AI Feedback Capture</p>
+            </div>
+        </div>
+        <div class="watermark">SECTION: AI INTEGRATION</div>
+    </div>
+
+    <!-- SLIDE 10: VIDEO DEMO -->
+    <div class="slide">
+        <h2>Live Application Demonstration</h2>
+        <div class="video-container">
+            <video controls autoplay muted loop>
+                <source src="docs/videos/app_demo.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+            <p style="margin-top: 20px; font-style: italic;">Recorded capture of EdgeVoice handling real-time execution tasks.</p>
+        </div>
+        <div class="watermark">SECTION: VIDEO DEMO</div>
+    </div>
+
+    <!-- SLIDE 11: DATA FLOW -->
+    <div class="slide">
+        <h2>05.0 Application Data Flow</h2>
+        <div class="step-list">
+            <div class="step-item">
+                <div class="step-number">1</div>
+                <h3>User Action</h3>
+                <p>Interaction via UI component (e.g., toggling a Cyan light switch or initiating Mic pulse).</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">2</div>
+                <h3>Provider Dispatch</h3>
+                <p>UI calls <code>EdgeVoiceVoiceProvider</code> which manages local reactive state variables.</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">3</div>
+                <h3>Service Execution</h3>
+                <p>Provider calls <code>ApiService</code> (Dio) or BLE service to transmit command to backend/hardware.</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">4</div>
+                <h3>State Mutation</h3>
+                <p>Upon success, <code>notifyListeners()</code> is triggered, updating the global application state.</p>
+            </div>
+            <div class="step-item">
+                <div class="step-number">5</div>
+                <h3>UI Redraw</h3>
+                <p>Scoped <code>Consumer</code> widgets rebuild instantly to reflect updated device status or AI response.</p>
+            </div>
+        </div>
+        <div class="watermark">SECTION: DATA PERSISTENCE</div>
+    </div>
+
+    <!-- SLIDE 12: PROTOCOLS -->
+    <div class="slide">
+        <h2>06.0 Integration Protocols</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Protocol</th>
+                    <th>Endpoint / Service</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Local Control</td>
+                    <td>BLE GATT</td>
+                    <td>Arduino Nano 33 BLE Service</td>
+                </tr>
+                <tr>
+                    <td>Remote Sync</td>
+                    <td>HTTPS REST</td>
+                    <td>.NET Backend API / Auth</td>
+                </tr>
+                <tr>
+                    <td>Profile Identity</td>
+                    <td>Multipart Form</td>
+                    <td><code>Auth/upload-image</code></td>
+                </tr>
+                <tr>
+                    <td>Command Engine</td>
+                    <td>TinyML Model</td>
+                    <td>Local Hardware Execution</td>
+                </tr>
+            </tbody>
+        </table>
+        <div style="margin-top: 30px;">
+            <p>State-of-the-art secure handshake protocols ensure user data privacy during both local and remote operations.</p>
+        </div>
+        <div class="watermark">SECTION: PROTOCOLS</div>
+    </div>
+
+    <!-- SLIDE 13: CLOSING -->
+    <div class="slide divider">
+        <h1>Thank You</h1>
+        <p style="color: var(--accent-cyan); font-size: 1.5rem;">Q&A | EdgeVoice Mobile Solutions</p>
+        <div style="margin-top: 40px; background: rgba(0, 242, 254, 0.05); padding: 25px; border-radius: 15px; border: 1px solid var(--accent-cyan);">
+            <p style="color: #fff;"><strong>Local Testing Requirements:</strong></p>
+            <p style="font-size: 1rem;">Active Bluetooth, Internet Connection (for Cloud Path), and Powered Arduino Nano Hardware.</p>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

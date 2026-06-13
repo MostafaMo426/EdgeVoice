@@ -22,11 +22,10 @@ class LogsScreenState extends State<LogsScreen> {
 
   Future<void> refreshLogs() async {
     if (!mounted) return;
+    setState(() => _isLoading = true);
     final logs = await _apiService.getLogs();
     if (mounted) {
       setState(() {
-        // Sort by id descending to ensure newest is at the top
-        logs.sort((a, b) => (b['id'] ?? 0).compareTo(a['id'] ?? 0));
         _logs = List.from(logs);
         _isLoading = false;
       });
@@ -66,6 +65,31 @@ class LogsScreenState extends State<LogsScreen> {
                             separatorBuilder: (context, index) => const Divider(color: Colors.white10),
                             itemBuilder: (context, index) {
                               final log = _logs[index];
+                              
+                              // Extract timestamp from multiple possible keys
+                              String rawTime = log['timestamp'] ?? 
+                                               log['Timestamp'] ?? 
+                                               log['createdAt'] ?? 
+                                               log['CreatedAt'] ?? 
+                                               "";
+                              
+                              String formattedTime = "Just now";
+                              
+                              if (rawTime.isNotEmpty) {
+                                try {
+                                  DateTime dt = DateTime.parse(rawTime).toLocal();
+                                  // Simple formatting: HH:mm:ss | yyyy-MM-dd
+                                  String hour = dt.hour.toString().padLeft(2, '0');
+                                  String min = dt.minute.toString().padLeft(2, '0');
+                                  String sec = dt.second.toString().padLeft(2, '0');
+                                  String day = dt.day.toString().padLeft(2, '0');
+                                  String month = dt.month.toString().padLeft(2, '0');
+                                  formattedTime = "$hour:$min:$sec  |  $day/$month/${dt.year}";
+                                } catch (e) {
+                                  formattedTime = rawTime; // Fallback to raw if parse fails
+                                }
+                              }
+
                               return ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(Icons.history, color: Color(0xFF00F0FF), size: 20),
@@ -74,7 +98,7 @@ class LogsScreenState extends State<LogsScreen> {
                                   style: const TextStyle(color: Colors.white, fontSize: 14),
                                 ),
                                 subtitle: Text(
-                                  log['createdAt'] ?? "Just now",
+                                  formattedTime,
                                   style: const TextStyle(color: Colors.grey, fontSize: 11),
                                 ),
                               );

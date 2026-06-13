@@ -4,11 +4,13 @@ import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
-import 'bypass_service.dart'; // Import the bypass service
+import 'bypass_service.dart';
+import 'local_cache_service.dart';
 
 class ApiService {
   late final Dio _dio;
   final BypassService _bypass = BypassService();
+  final LocalCacheService _cache = LocalCacheService();
 
   ApiService() {
     _dio = Dio(BaseOptions(
@@ -103,15 +105,30 @@ class ApiService {
   Future<List<dynamic>> getRooms() async {
     if (await _isBypass()) return _bypass.getRooms();
     try {
-      // Updated to match Swagger: /api/Rooms/my-rooms has no parameters
-      final response = await _dio.get('Rooms/my-rooms');
-      if (response.statusCode == 200 && response.data is List) {
-        return response.data;
+      debugPrint("[API] Fetching rooms from server...");
+      final response = await _dio.get('Rooms/my-rooms').timeout(const Duration(seconds: 15));
+      
+      List<dynamic> rooms = [];
+      if (response.statusCode == 200) {
+        if (response.data is List) {
+          rooms = response.data;
+        } else if (response.data is Map && response.data['data'] is List) {
+          rooms = response.data['data'];
+        }
+        
+        if (rooms.isNotEmpty) {
+          debugPrint("[API] Successfully fetched ${rooms.length} rooms. Caching locally...");
+          await _cache.saveRooms(rooms);
+          return rooms;
+        }
       }
     } catch (e) {
-      debugPrint("Error fetching rooms: $e");
+      debugPrint("[API] Error fetching rooms (falling back to cache): $e");
     }
-    return [];
+    
+    final cached = await _cache.getRooms();
+    debugPrint("[API] Returning ${cached.length} rooms from local cache.");
+    return cached;
   }
 
   Future<bool> addRoom(String name) async {
@@ -163,27 +180,37 @@ class ApiService {
   Future<List<dynamic>> getRoomDevices(int roomId) async {
     if (await _isBypass()) return _bypass.getRoomDevices(roomId);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getInt('userId');
-      
-      Response response;
-      try {
-        // Try fetching all devices first
-        response = await _dio.get('Devices');
-      } catch (e) {
-        // Fallback: Try with userId if the server requires it
-        response = await _dio.get('Devices', queryParameters: {'userId': userId});
-      }
+      debugPrint("[API] Fetching devices for room $roomId...");
+      final response = await _dio.get('Devices').timeout(const Duration(seconds: 15));
 
-      if (response.statusCode == 200 && response.data is List) {
-        return (response.data as List).where((d) => 
-          (d['roomId'] == roomId || d['RoomId'] == roomId)
-        ).toList();
+      List<dynamic> allDevices = [];
+      if (response.statusCode == 200) {
+        if (response.data is List) {
+          allDevices = response.data;
+        } else if (response.data is Map && response.data['data'] is List) {
+          allDevices = response.data['data'];
+        }
+
+        if (allDevices.isNotEmpty) {
+          final roomDevices = allDevices.where((d) => 
+            (d['roomId'] == roomId || d['RoomId'] == roomId)
+          ).toList();
+          
+          // Sync entire device list to cache for full offline support
+          await _cache.saveDevices(allDevices);
+          debugPrint("[API] Fetched ${roomDevices.length} devices for room $roomId. Full list cached.");
+          return roomDevices;
+        }
       }
     } catch (e) {
-      debugPrint("Error fetching room devices: $e");
+      debugPrint("[API] Error fetching devices (falling back to cache): $e");
     }
-    return [];
+    
+    // Offline fallback
+    final cached = await _cache.getDevices();
+    final roomDevices = cached.where((d) => (d['roomId'] == roomId || d['RoomId'] == roomId)).toList();
+    debugPrint("[API] Returning ${roomDevices.length} devices for room $roomId from local cache.");
+    return roomDevices;
   }
 
   // --- DEVICES API ---
@@ -272,21 +299,21 @@ class ApiService {
   Future<bool> updateDeviceStatus(int id, bool isOn) async {
     if (await _isBypass()) return _bypass.updateDeviceStatus(id, isOn);
     try {
-      // 1. Try PATCH update-status
+      // 1. Try PATCH update-status (Fast timeout for high responsiveness)
       try {
-        final response = await _dio.patch('Devices/$id/update-status', data: isOn);
+        final response = await _dio.patch('Devices/$id/update-status', data: isOn).timeout(const Duration(seconds: 2));
         if (response.statusCode == 200 || response.statusCode == 204) return true;
       } catch (_) {}
 
-      // 2. Try generic PUT (Match Swagger Device schema, removed 'status')
+      // 2. Try generic PUT
       final response = await _dio.put('Devices/$id', data: {
         'id': id,
         'isOn': isOn,
-      });
+      }).timeout(const Duration(seconds: 2));
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      debugPrint("Error updating device status: $e");
-      return false;
+      debugPrint("Offline: Status update skipped for cloud.");
+      return true; // Return true so UI doesn't show error while offline
     }
   }
 
@@ -404,37 +431,13 @@ class ApiService {
   // --- LOGS ---
 
   Future<bool> addLog(String message) async {
-    if (await _isBypass()) return _bypass.addLog(message);
-    try {
-      // The Log schema in Swagger uses 'id', 'message', 'userId', 'deviceName', 'source', 'timestamp'
-      // Only 'message' and optionally 'userId', 'deviceName', 'source' should be sent.
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getInt('userId');
-
-      final response = await _dio.post('Logs', data: {
-        "message": message,
-        if (userId != null) "userId": userId,
-        "timestamp": DateTime.now().toIso8601String(),
-      });
-      return response.statusCode == 200 || response.statusCode == 201;
-    } catch (e) {
-      debugPrint("Error adding log: $e");
-      return false;
-    }
+    // OFFLINE ONLY per user request
+    await _cache.addLog(message);
+    return true;
   }
 
   Future<List<dynamic>> getLogs() async {
-    if (await _isBypass()) return _bypass.getLogs();
-    try {
-      // Swagger /api/Logs GET has no parameters.
-      final response = await _dio.get('Logs');
-      if (response.statusCode == 200 && response.data is List) {
-        return response.data;
-      }
-    } catch (e) {
-      debugPrint("Error fetching logs: $e");
-    }
-    return [];
+    return await _cache.getLogs();
   }
 
   // --- AUDIO API ---
