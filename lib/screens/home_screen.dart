@@ -131,22 +131,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   /// Helper for API/Manual updates to keep both data structures in sync
   void _updateUiStateForLegacyKey(String key, bool isOn) {
+    if (!mounted) return;
     setState(() {
       // Update legacy map
       if (deviceStates.containsKey(key)) {
         deviceStates[key] = isOn;
       }
       
-      // Update dynamic rooms list with case-insensitive property checks
+      // Update dynamic rooms list
       for (var room in _rooms) {
         final devices = (room['devices'] ?? room['Devices']) as List? ?? [];
         for (var device in devices) {
-          String dName = device['name'] ?? device['Name'] ?? "";
-          String rName = room['name'] ?? room['Name'] ?? "";
+          String dName = (device['name'] ?? device['Name'] ?? "").toString();
+          String rName = (room['name'] ?? room['Name'] ?? "").toString();
           String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
+          
           if (legacyKey == key) {
-            if (device.containsKey('isOn')) device['isOn'] = isOn;
-            if (device.containsKey('IsOn')) device['IsOn'] = isOn;
+            // Only update the status bits to prevent losing other data
+            device['isOn'] = isOn;
+            device['IsOn'] = isOn;
             device['status'] = isOn;
           }
         }
@@ -374,23 +377,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   IconData _getDeviceIcon(String type) {
-    switch (type) {
-      case "Lights": return Icons.lightbulb_outline;
-      case "TV": return Icons.tv;
-      case "AC": return Icons.ac_unit;
-      case "Curtains": return Icons.curtains;
-      case "Fan": return Icons.air;
-      case "Door": return Icons.door_front_door;
-      case "Coffee Maker": return Icons.coffee;
-      case "Fridge": return Icons.kitchen;
-      case "Air Fryer": return Icons.outdoor_grill;
-      case "Washing Machine":
-      case "Washer": return Icons.local_laundry_service;
-      case "Dryer": return Icons.dry;
-      case "Vacuum": return Icons.cleaning_services;
-      case "Humidifier": return Icons.water_drop;
-      default: return Icons.device_hub;
-    }
+    type = type.toLowerCase().trim();
+    if (type.contains("light")) return Icons.lightbulb_outline;
+    if (type.contains("tv") || type.contains("television")) return Icons.tv;
+    if (type.contains("ac") || type.contains("air")) return Icons.ac_unit;
+    if (type.contains("curtain")) return Icons.curtains;
+    if (type.contains("fan")) return Icons.air;
+    if (type.contains("door")) return Icons.door_front_door;
+    if (type.contains("coffee")) return Icons.coffee;
+    if (type.contains("fridge") || type.contains("refrigerator")) return Icons.kitchen;
+    if (type.contains("fryer")) return Icons.outdoor_grill;
+    if (type.contains("wash") || type.contains("laundry")) return Icons.local_laundry_service;
+    if (type.contains("dryer")) return Icons.dry;
+    if (type.contains("vacuum")) return Icons.cleaning_services;
+    if (type.contains("humidifier")) return Icons.water_drop;
+    return Icons.device_hub;
   }
 
   // --- GROUP TOGGLES ---

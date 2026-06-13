@@ -1,11 +1,11 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 // Conditional import to handle Web/Mobile compilation
 import 'package:vosk_flutter_2/vosk_flutter_2.dart' if (dart.library.html) 'vosk_stub.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
-import '../services/audio_feedback_service.dart';
 import '../services/api_service.dart';
 import 'device_pairing_provider.dart';
 
@@ -110,7 +110,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
               String text = data['partial'] ?? "";
               if (text.isNotEmpty) {
                 _realtimeText = text;
-                notifyListeners();
+                WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
               }
             } catch (e) {
               debugPrint("Vosk Partial Error: $e");
@@ -124,7 +124,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
               if (text.isNotEmpty) {
                 _lastTranscription = text;
                 _realtimeText = text;
-                notifyListeners();
+                WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
               }
             } catch (e) {
               debugPrint("Vosk Result Error: $e");
@@ -180,7 +180,7 @@ class EdgeVoiceVoiceProvider extends ChangeNotifier {
     // Show interpreted command
     String displayCmds = hardwareCommands.isEmpty ? "Unknown: $text" : "Interpreted: ${hardwareCommands.join(' ')}";
     _realtimeText = displayCmds;
-    notifyListeners();
+    WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
     debugPrint("[VOICE] ⚙️ $displayCmds");
 
     // Let the user read the interpretation for 3.5 seconds
