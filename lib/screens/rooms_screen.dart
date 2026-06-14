@@ -33,11 +33,9 @@ class RoomsScreenState extends State<RoomsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error fetching rooms: ${e.toString()}")),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error fetching rooms: ${e.toString()}")),
+        );
       }
     }
   }
@@ -100,17 +98,17 @@ class RoomsScreenState extends State<RoomsScreen> {
                         if (!mounted) return;
                         if (success) {
                           await fetchRooms();
-                          if (context.mounted) Navigator.pop(context);
+                          if (mounted) Navigator.pop(context);
                         } else {
                           setDialogState(() => isSubmitting = false);
-                          if (context.mounted) {
+                          if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text("Failed to add room. Please try again.")),
                             );
                           }
                         }
                       } catch (e) {
-                        if (!context.mounted) return;
+                        if (!mounted) return;
                         setDialogState(() => isSubmitting = false);
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text("Error: ${e.toString()}")),
@@ -171,10 +169,10 @@ class RoomsScreenState extends State<RoomsScreen> {
                       final success = await _apiService.deleteRoom(roomId);
                       if (success) {
                         await fetchRooms();
-                        if (context.mounted) Navigator.pop(context);
+                        if (mounted) Navigator.pop(context);
                       } else {
                         setDialogState(() => isProcessing = false);
-                        if (context.mounted) {
+                        if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text("Failed to delete room.")),
                           );
@@ -196,10 +194,10 @@ class RoomsScreenState extends State<RoomsScreen> {
                       final success = await _apiService.updateRoom(roomId, updatedName.trim());
                       if (success) {
                         await fetchRooms();
-                        if (context.mounted) Navigator.pop(context);
+                        if (mounted) Navigator.pop(context);
                       } else {
                         setDialogState(() => isProcessing = false);
-                        if (context.mounted) {
+                        if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text("Failed to update room.")),
                           );
@@ -362,7 +360,7 @@ class RoomsScreenState extends State<RoomsScreen> {
                               
                               if (success) {
                                 // Close dialog immediately using the correct dialogContext
-                                Navigator.of(dialogContext).pop();
+                                if (mounted) Navigator.of(dialogContext).pop();
                                 
                                 // Refresh devices in the background
                                 final updatedDevices = await _apiService.getRoomDevices(roomId);
@@ -372,7 +370,7 @@ class RoomsScreenState extends State<RoomsScreen> {
                                   currentDevices.addAll(updatedDevices);
                                 });
                               } else {
-                                if (dialogContext.mounted) {
+                                if (mounted) {
                                   setDialogState(() => isAdding = false);
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text("Failed to add device")),
@@ -380,7 +378,7 @@ class RoomsScreenState extends State<RoomsScreen> {
                                 }
                               }
                             } catch (e) {
-                              if (dialogContext.mounted) {
+                              if (mounted) {
                                 setDialogState(() => isAdding = false);
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(content: Text("Error: $e")),

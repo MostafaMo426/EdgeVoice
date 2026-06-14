@@ -9,7 +9,7 @@ class DevicePairingProvider extends ChangeNotifier {
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _commandCharacteristic;
   BluetoothCharacteristic? _statusCharacteristic;
-  bool _isConnecting = false;
+  final bool _isConnecting = false;
   bool _ignoreNotifications = false;
   Timer? _livelySyncTimer;
   
@@ -19,7 +19,7 @@ class DevicePairingProvider extends ChangeNotifier {
   static const String STATUS_CHAR_UUID = "19B10002-E8F2-537E-4F6C-D104768A1214";
 
   // Stores hardware status: {"R1": true, "R2": false, ...}
-  Map<String, bool> _hardwareDeviceStates = {};
+  final Map<String, bool> _hardwareDeviceStates = {};
   
   Map<String, bool> get hardwareDeviceStates => _hardwareDeviceStates;
 

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'settings_screen.dart'; 
 import 'logs_screen.dart'; // Import Logs Screen
 import 'rooms_screen.dart'; // Import Rooms Screen
+import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart'; // Import API Service
 import '../providers/edgevoice_voice_provider.dart';
 import '../providers/device_pairing_provider.dart';
@@ -58,7 +59,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     _loadInitialStates();
     _loadProfileImage();
-    _startPolling();
+    
+    // Delayed startup tasks to prevent Android overload crash
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _requestPermissions();
+      });
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) _startPolling();
+      });
+    });
     
     // Listen for hardware status updates from BLE
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -95,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         if (targetLegacyKey.isNotEmpty) {
           if (deviceStates[targetLegacyKey] != isOn) {
-            debugPrint("[SYNC] Live Update: Relay $relay (${targetLegacyKey}) flipped to $isOn");
+            debugPrint("[SYNC] Live Update: Relay $relay ($targetLegacyKey) flipped to $isOn");
             _updateUiStateForLegacyKey(targetLegacyKey, isOn);
             hasChanged = true;
             
@@ -119,41 +129,44 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  /// Helper to check if a Relay matches a UI Legacy Key
-  bool _isRelayMatch(String relay, String key) {
-    if (relay == "R1") return key == 'living_lights';
-    if (relay == "R2") return key == 'ac_unit';
-    if (relay == "R3") return key == 'bed_lights';
-    if (relay == "R4") return key == 'living_tv';
-    return false;
-  }
 
 
   /// Helper for API/Manual updates to keep both data structures in sync
   void _updateUiStateForLegacyKey(String key, bool isOn) {
     if (!mounted) return;
-    setState(() {
-      // Update legacy map
-      if (deviceStates.containsKey(key)) {
-        deviceStates[key] = isOn;
-      }
-      
-      // Update dynamic rooms list
-      for (var room in _rooms) {
-        final devices = (room['devices'] ?? room['Devices']) as List? ?? [];
-        for (var device in devices) {
-          String dName = (device['name'] ?? device['Name'] ?? "").toString();
-          String rName = (room['name'] ?? room['Name'] ?? "").toString();
-          String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
-          
-          if (legacyKey == key) {
-            // Only update the status bits to prevent losing other data
-            device['isOn'] = isOn;
-            device['IsOn'] = isOn;
-            device['status'] = isOn;
+    
+    // Use safe callback to prevent "setState during build" crash
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        // Update legacy map
+        if (deviceStates.containsKey(key)) {
+          deviceStates[key] = isOn;
+        }
+        
+        // Update dynamic rooms list
+        for (var room in _rooms) {
+          final devices = (room['devices'] ?? room['Devices']) as List? ?? [];
+          for (var device in devices) {
+            try {
+              String dName = (device['name'] ?? device['Name'] ?? "").toString();
+              String dType = (device['type'] ?? device['Type'] ?? "").toString();
+              String rName = (room['name'] ?? room['Name'] ?? "").toString();
+              
+              String? legacyKey = _mapDeviceToLegacyKey(rName, dName);
+              if (legacyKey == null && dType.isNotEmpty) {
+                legacyKey = _mapDeviceToLegacyKey(rName, dType);
+              }
+              
+              if (legacyKey == key) {
+                device['isOn'] = isOn;
+                device['IsOn'] = isOn;
+                device['status'] = isOn;
+              }
+            } catch (_) {}
           }
         }
-      }
+      });
     });
   }
 
@@ -331,12 +344,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     deviceName = deviceName.toLowerCase();
     
     if (roomName.contains("living")) {
-      if (deviceName.contains("light") || deviceName.contains("lamp")) return "living_lights";
-      if (deviceName.contains("ac") || deviceName.contains("air") || deviceName.contains("unit")) return "ac_unit";
+      if (deviceName.contains("light") || deviceName.contains("lamp") || deviceName.contains("bulb")) return "living_lights";
+      if (deviceName.contains("ac") || deviceName.contains("air") || deviceName.contains("unit") || deviceName.contains("cool")) return "ac_unit";
+      if (deviceName.contains("tv") || deviceName.contains("television") || deviceName.contains("screen")) return "living_tv";
     } else if (roomName.contains("bed")) {
-      if (deviceName.contains("light") || deviceName.contains("lamp")) return "bed_lights";
-      if (deviceName.contains("tv") || deviceName.contains("television")) return "living_tv"; // Mapping R4/Bedroom TV to living_tv key
-      if (deviceName.contains("fan")) return "bed_fan";
+      if (deviceName.contains("light") || deviceName.contains("lamp") || deviceName.contains("bulb")) return "bed_lights";
+      if (deviceName.contains("tv") || deviceName.contains("television") || deviceName.contains("screen")) return "living_tv"; // Mapping Bedroom TV to living_tv key
+      if (deviceName.contains("fan") || deviceName.contains("vent")) return "bed_fan";
     }
     
     // Appliance mappings
@@ -380,11 +394,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     String combined = "${type.toLowerCase()} ${name.toLowerCase()}".trim();
     if (combined.isEmpty) return Icons.device_hub;
 
-    if (combined.contains("light") || combined.contains("lamp")) return Icons.lightbulb_outline;
-    if (combined.contains("tv") || combined.contains("television")) return Icons.tv;
-    if (combined.contains("ac") || combined.contains("air") || combined.contains("unit")) return Icons.ac_unit;
+    if (combined.contains("light") || combined.contains("lamp") || combined.contains("bulb")) return Icons.lightbulb_outline;
+    if (combined.contains("tv") || combined.contains("television") || combined.contains("screen")) return Icons.tv;
+    if (combined.contains("ac") || combined.contains("air") || combined.contains("unit") || combined.contains("cool") || combined.contains("fan") || combined.contains("vent")) return Icons.ac_unit;
     if (combined.contains("curtain")) return Icons.curtains;
-    if (combined.contains("fan") || combined.contains("vent")) return Icons.air;
     if (combined.contains("door") || combined.contains("lock")) return Icons.door_front_door;
     if (combined.contains("coffee")) return Icons.coffee;
     if (combined.contains("fridge") || combined.contains("refrigerator") || combined.contains("kitchen")) return Icons.kitchen;
@@ -587,14 +600,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         
         // RECOVERY: If devices come with empty names, try to assign them based on type
         for (var device in devices) {
-          String name = (device['name'] ?? device['Name'] ?? "").toString().trim();
-          String type = (device['type'] ?? device['Type'] ?? "").toString().trim();
+          String rawName = (device['name'] ?? device['Name'] ?? "").toString().trim();
+          String rawType = (device['type'] ?? device['Type'] ?? "").toString().trim();
           
-          if (name.isEmpty) {
-            if (type.toLowerCase().contains("light")) device['name'] = "Lights";
-            else if (type.toLowerCase().contains("ac") || type.toLowerCase().contains("air")) device['name'] = "AC Unit";
-            else if (type.toLowerCase().contains("tv")) device['name'] = "TV";
-            else device['name'] = "Device";
+          if (rawName.isEmpty || rawName.toLowerCase() == "device") {
+            if (rawType.toLowerCase().contains("light") || rawType.toLowerCase().contains("lamp")) {
+              device['name'] = "Lights";
+            } else if (rawType.toLowerCase().contains("ac") || rawType.toLowerCase().contains("air") || rawType.toLowerCase().contains("unit")) {
+              device['name'] = "AC Unit";
+            } else if (rawType.toLowerCase().contains("tv") || rawType.toLowerCase().contains("television")) {
+              device['name'] = "TV";
+            } else {
+              device['name'] = "Smart Device";
+            }
           }
         }
         
@@ -635,6 +653,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       debugPrint("Error loading initial states: $e");
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _requestPermissions() async {
+    // Bluetooth and Mic are critical for your project
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+      Permission.microphone,
+    ].request();
+    
+    debugPrint("[PERMISSIONS] Bluetooth Scan: ${statuses[Permission.bluetoothScan]}");
+    debugPrint("[PERMISSIONS] Bluetooth Connect: ${statuses[Permission.bluetoothConnect]}");
+    debugPrint("[PERMISSIONS] Microphone: ${statuses[Permission.microphone]}");
   }
 
   void _startPolling() async {

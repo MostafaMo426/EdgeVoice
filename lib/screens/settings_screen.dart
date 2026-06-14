@@ -64,7 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showImageSourceActionSheet(BuildContext context) {
-    print(">>> [UI] Opening Image Source Sheet");
+    debugPrint(">>> [UI] Opening Image Source Sheet");
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E293B),
@@ -79,7 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.photo_library, color: Colors.white),
               title: const Text("Gallery", style: TextStyle(color: Colors.white)),
               onTap: () async {
-                print(">>> [UI] Gallery Tapped");
+    debugPrint(">>> [UI] Gallery Tapped");
                 Navigator.pop(bottomSheetContext);
                 try {
                   final picker = ImagePicker();
@@ -89,13 +89,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     maxHeight: 1000,
                   );
                   if (pickedFile != null) {
-                    print(">>> [UI] Image Selected: ${pickedFile.name}");
+                    debugPrint(">>> [UI] Image Selected: ${pickedFile.name}");
                     _uploadImage(pickedFile);
                   } else {
-                    print(">>> [UI] Picking Cancelled");
+                    debugPrint(">>> [UI] Picking Cancelled");
                   }
                 } catch (e) {
-                  print(">>> [UI] Picking Error: $e");
+                  debugPrint(">>> [UI] Picking Error: $e");
                 }
               },
             ),
@@ -103,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: const Icon(Icons.camera_alt, color: Colors.white),
               title: const Text("Camera", style: TextStyle(color: Colors.white)),
               onTap: () async {
-                print(">>> [UI] Camera Tapped");
+                debugPrint(">>> [UI] Camera Tapped");
                 Navigator.pop(bottomSheetContext);
                 try {
                   final picker = ImagePicker();
@@ -113,11 +113,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     maxHeight: 1000,
                   );
                   if (pickedFile != null) {
-                    print(">>> [UI] Image Captured: ${pickedFile.name}");
+                    debugPrint(">>> [UI] Image Captured: ${pickedFile.name}");
                     _uploadImage(pickedFile);
                   }
                 } catch (e) {
-                  print(">>> [UI] Camera Error: $e");
+                  debugPrint(">>> [UI] Camera Error: $e");
                 }
               },
             ),
@@ -128,7 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _uploadImage(XFile file) async {
-    print(">>> [UI] _uploadImage called for ${file.name}");
+    debugPrint(">>> [UI] _uploadImage called for ${file.name}");
     setState(() => _isLoadingProfile = true);
     
     try {
@@ -162,13 +162,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         }
         
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Profile picture updated")),
           );
         }
       } else {
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Failed to upload image")),
           );
@@ -176,7 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       debugPrint("[DEBUG] SettingsScreen Upload Error: $e");
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Upload error: $e")),
         );
@@ -398,7 +398,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
-                        print(">>> [UI] Edit Button Tapped");
+                      debugPrint(">>> [UI] Edit Button Tapped");
                         _showImageSourceActionSheet(context);
                       },
                       child: Container(
